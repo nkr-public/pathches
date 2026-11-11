@@ -1,32 +1,53 @@
-import type { WorkspaceComponentProps } from '@dec/layout';
-import { AccountDef, type FieldRule } from '@dec/cr-factory';
-import { extendGenericWorkspace } from './GridWorkspaces.tsx';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { UserSearch } from 'lucide-react';
+import { GenericSearch, type SearchStatus } from '@dec/ui/search';
+import { AccountDef } from '@dec/cr-factory';
+import { toSearchMetadata } from '../../search/tables.ts';
+import { PageHeader } from '../../shell/PageHeader.tsx';
 
-const toHeader = (name: string) => name.replace(/([A-Z])/g, ' $1').replace(/^./, (c) => c.toUpperCase());
-const toWidth = (f: FieldRule) => Math.min(Math.max((f.size ?? f.max ?? 12) * 8, 100), 280);
+const metadata = toSearchMetadata(AccountDef);
+const TOTAL = metadata.numRows || 51;
 
-const ACCOUNT_COLUMNS = AccountDef.fields.map((f) => ({
-  id: f.field,
-  headerName: toHeader(f.field),
-  width: toWidth(f),
-  editable: !f.isPrimaryKey && !f.isGenerated,
-}));
+export default function SearchAccountPage() {
+  const [status, setStatus] = useState<SearchStatus>({ state: 'idle' });
+  const timer = useRef<ReturnType<typeof setInterval> | null>(null);
 
-const ACCOUNT_KEY = AccountDef.fields.find((f) => f.isPrimaryKey)?.field ?? AccountDef.fields[0].field;
+  const stop = useCallback(() => {
+    if (timer.current) clearInterval(timer.current);
+    timer.current = null;
+  }, []);
+  useEffect(() => stop, [stop]);
 
-function AccountHeader({ workspaceId }: WorkspaceComponentProps) {
+  const handleSearch = useCallback(() => {
+    stop();
+    let progress = 0;
+    setStatus((s) => ({ state: 'running', progress: 0, found: 0, total: TOTAL, errors: s.errors }));
+    timer.current = setInterval(() => {
+      progress = Math.min(100, progress + 8 + Math.random() * 12);
+      const found = Math.round((progress / 100) * TOTAL);
+      setStatus((s) => {
+        const errors = progress > 55 && Math.random() < 0.15
+          ? [...(s.errors ?? []), { id: crypto.randomUUID(), message: `Partition ${Math.ceil(Math.random() * 8)} timed out, partial results`, source: 'ACCOUNT', time: Date.now() }]
+          : s.errors;
+        return progress >= 100 ? { state: 'success', progress: 100, found: TOTAL, total: TOTAL, errors } : { ...s, progress, found, errors };
+      });
+      if (progress >= 100) stop();
+    }, 250);
+  }, [stop]);
+
+  const handleCancel = useCallback(() => {
+    stop();
+    setStatus((s) => ({ ...s, state: 'cancelled' }));
+  }, [stop]);
+
   return (
-    <div style={{ padding: '12px 12px 8px' }}>
-      <h2 style={{ margin: 0, fontSize: 16 }}>Accounts</h2>
-      <p style={{ margin: '4px 0 0', fontSize: 12, opacity: 0.7 }}>Generic workspace · {workspaceId}</p>
+    <div className="flex min-h-0 flex-1 flex-col">
+      <PageHeader icon={UserSearch} title="Accounts" description="Search Accounts" />
+      <div className="page-scroll ui-scroll">
+        <div className="mx-auto flex max-w-[1400px] flex-col gap-4 p-[18px]">
+          <GenericSearch metadata={metadata} title="Account search" status={status} onSearch={handleSearch} onCancel={handleCancel} onReset={() => setStatus({ state: 'idle' })} />
+        </div>
+      </div>
     </div>
   );
 }
-
-export const AccountGenericWorkspace = extendGenericWorkspace({
-  header: AccountHeader,
-  columns: ACCOUNT_COLUMNS,
-  keyColumn: ACCOUNT_KEY,
-  rows: 50_000,
-  height: 480,
-});
