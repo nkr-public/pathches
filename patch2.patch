@@ -1,0 +1,98 @@
+Subject: [PATCH] patch2
+---
+Index: frontend/packages/i18n/src/locales/en.ts
+===================================================================
+diff --git a/frontend/packages/i18n/src/locales/en.ts b/frontend/packages/i18n/src/locales/en.ts
+deleted file mode 100644
+--- a/frontend/packages/i18n/src/locales/en.ts	(revision a046ebf7a7aa060e9f71631c7e5ac397e2cacad6)
++++ /dev/null	(revision a046ebf7a7aa060e9f71631c7e5ac397e2cacad6)
+@@ -1,17 +0,0 @@
+-import type { Messages } from '../types.ts';
+-
+-export const en = {
+-  common: {
+-    ok: 'OK',
+-    cancel: 'Cancel',
+-    save: 'Save',
+-    delete: 'Delete',
+-    search: 'Search',
+-    loading: 'Loading…',
+-    close: 'Close',
+-    language: 'Language',
+-  },
+-  greeting: 'Hello, {name}!',
+-  items_one: '{count} item',
+-  items_other: '{count} items',
+-} satisfies Messages;
+Index: frontend/packages/i18n/src/locales/fr.ts
+===================================================================
+diff --git a/frontend/packages/i18n/src/locales/fr.ts b/frontend/packages/i18n/src/locales/fr.ts
+deleted file mode 100644
+--- a/frontend/packages/i18n/src/locales/fr.ts	(revision a046ebf7a7aa060e9f71631c7e5ac397e2cacad6)
++++ /dev/null	(revision a046ebf7a7aa060e9f71631c7e5ac397e2cacad6)
+@@ -1,18 +0,0 @@
+-import type { en } from './en.ts';
+-import type { Shape } from '../shape.ts';
+-
+-export const fr: Shape<typeof en> = {
+-  common: {
+-    ok: 'OK',
+-    cancel: 'Annuler',
+-    save: 'Enregistrer',
+-    delete: 'Supprimer',
+-    search: 'Rechercher',
+-    loading: 'Chargement…',
+-    close: 'Fermer',
+-    language: 'Langue',
+-  },
+-  greeting: 'Bonjour, {name} !',
+-  items_one: '{count} élément',
+-  items_other: '{count} éléments',
+-};
+Index: frontend/packages/i18n/src/locales/index.ts
+===================================================================
+diff --git a/frontend/packages/i18n/src/locales/index.ts b/frontend/packages/i18n/src/locales/index.ts
+deleted file mode 100644
+--- a/frontend/packages/i18n/src/locales/index.ts	(revision a046ebf7a7aa060e9f71631c7e5ac397e2cacad6)
++++ /dev/null	(revision a046ebf7a7aa060e9f71631c7e5ac397e2cacad6)
+@@ -1,6 +0,0 @@
+-import { defineMessages } from '../registry.ts';
+-import { en } from './en.ts';
+-import { fr } from './fr.ts';
+-
+-export { en, fr };
+-export const common = defineMessages('common', { en, fr });
+Index: frontend/packages/i18n/package.json
+IDEA additional info:
+Subsystem: com.intellij.openapi.diff.impl.patch.CharsetEP
+<+>UTF-8
+===================================================================
+diff --git a/frontend/packages/i18n/package.json b/frontend/packages/i18n/package.json
+--- a/frontend/packages/i18n/package.json	(revision a046ebf7a7aa060e9f71631c7e5ac397e2cacad6)
++++ b/frontend/packages/i18n/package.json	(date 1795092768299)
+@@ -7,9 +7,7 @@
+   "types": "./src/index.ts",
+   "exports": {
+     ".": "./src/index.ts",
+-    "./react": "./src/react/index.tsx",
+-    "./locales/en": "./src/locales/en.ts",
+-    "./locales/fr": "./src/locales/fr.ts"
++    "./react": "./src/react/index.tsx"
+   },
+   "scripts": {
+     "typecheck": "tsc --noEmit"
+Index: frontend/packages/i18n/src/index.ts
+IDEA additional info:
+Subsystem: com.intellij.openapi.diff.impl.patch.CharsetEP
+<+>UTF-8
+===================================================================
+diff --git a/frontend/packages/i18n/src/index.ts b/frontend/packages/i18n/src/index.ts
+--- a/frontend/packages/i18n/src/index.ts	(revision a046ebf7a7aa060e9f71631c7e5ac397e2cacad6)
++++ b/frontend/packages/i18n/src/index.ts	(date 1795092768273)
+@@ -10,6 +10,5 @@
+   setLocale,
+   subscribeLocale,
+ } from './registry.ts';
+-export { common, en, fr } from './locales/index.ts';
+ export type { I18n, I18nOptions, Locale, MessageBundles, Messages, MessageKey, Params, TFunction, Translator } from './types.ts';
+ export type { Shape } from './shape.ts';
