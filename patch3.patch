@@ -1,0 +1,722 @@
+Subject: [PATCH] patch3
+---
+Index: frontend/packages/workspace/src/stores/HostServer.ts
+IDEA additional info:
+Subsystem: com.intellij.openapi.diff.impl.patch.CharsetEP
+<+>UTF-8
+===================================================================
+diff --git a/frontend/packages/workspace/src/stores/HostServer.ts b/frontend/packages/workspace/src/stores/HostServer.ts
+--- a/frontend/packages/workspace/src/stores/HostServer.ts	(revision 3aed2026fb215c551d310afeac959f58ba03daa0)
++++ b/frontend/packages/workspace/src/stores/HostServer.ts	(date 1795160243826)
+@@ -5,7 +5,7 @@
+ import { EngineRegistry, createTable, jsEngineFactory } from '@dec/data-engine';
+ import type { Table } from '@dec/data-engine';
+ import { registerColumnEngine } from '@dec/data-column';
+-import { TableCoreHost, ipcToRows } from '@dec/grid';
++import { TableCoreHost, cellsToIpc, ipcToRows } from '@dec/grid';
+ import type { CoreInfo, CoreInit, HostOp, TableSource } from '@dec/grid';
+ import { TableStore } from '../data/TableStore.ts';
+ import type { LoadPolicy } from './config.ts';
+@@ -47,6 +47,7 @@
+ type Rows = Record<string, unknown>[];
+ 
+ const MARKER_FILE = 'sync.json';
++const DATASET_FILE = 'dataset.arrow';
+ 
+ export const storeEngines = registerColumnEngine(new EngineRegistry().register(jsEngineFactory));
+ 
+@@ -216,6 +217,7 @@
+       const outcome = initial ? await this.firstLoad(store, policy, ctrl.signal, stillWanted) : await this.reload(store, discardLocal, ctrl.signal, stillWanted);
+       stillWanted();
+       store.loaded = true;
++      if (initial && policy === 'cache-then-network' && outcome.fromCache && !outcome.error) this.revalidateSoon(store);
+       return this.publish(store, { status: 'ready', ...outcome });
+     } catch (e) {
+       if (store.detached) throw abortError();
+@@ -241,23 +243,46 @@
+       if (!restored) await this.run(host, { op: 'LOAD_DATA', init: { ...init, rows: [] } }, signal);
+       return { fromCache: true, lastSyncAt: marker.syncedAt };
+     }
++    if (policy === 'cache-then-network') {
++      if (restored) return { fromCache: true, lastSyncAt: marker?.syncedAt ?? null };
++      const cached = await this.readDataset(setup);
++      stillWanted();
++      if (cached) {
++        await this.run(host, { op: 'LOAD_DATA', init: { ...init, rows: cached.rows as CoreInit['rows'] } }, signal);
++        return { fromCache: true, lastSyncAt: cached.syncedAt };
++      }
++    }
+     let rows: Rows;
+     try {
+       rows = await this.download(setup, signal);
+     } catch (e) {
+       stillWanted();
+-      if (!restored) throw e;
+-      return { fromCache: true, lastSyncAt: marker?.syncedAt ?? null, error: toFailure(e).message };
++      const error = toFailure(e).message;
++      if (restored) return { fromCache: true, lastSyncAt: marker?.syncedAt ?? null, error };
++      const cached = await this.readDataset(setup);
++      stillWanted();
++      if (!cached) throw e;
++      await this.run(host, { op: 'LOAD_DATA', init: { ...init, rows: cached.rows as CoreInit['rows'] } }, signal);
++      return { fromCache: true, lastSyncAt: cached.syncedAt, error };
+     }
+     stillWanted();
+     await this.run(host, { op: 'LOAD_DATA', init: { ...init, rows: rows as CoreInit['rows'] } }, signal);
++    await this.saveDataset(setup, rows);
+     return { fromCache: false, lastSyncAt: await this.writeMarker(store) };
+   }
+ 
++  private revalidateSoon(store: HostedStore): void {
++    setTimeout(() => {
++      if (store.detached) return;
++      this.load(store, 'network-only', false, new AbortController().signal).catch(() => undefined);
++    }, 0);
++  }
++
+   private async reload(store: HostedStore, discardLocal: boolean, signal: AbortSignal, stillWanted: () => void): Promise<Partial<StoreState>> {
+     const rows = await this.download(store.setup, signal);
+     stillWanted();
+     await this.run(store.host, { op: 'REPLACE', rows, discardLocal }, signal);
++    await this.saveDataset(store.setup, rows);
+     return { fromCache: false, lastSyncAt: await this.writeMarker(store) };
+   }
+ 
+@@ -277,6 +302,35 @@
+     return setup.maxAgeMs === null || this.now() - marker.syncedAt <= setup.maxAgeMs;
+   }
+ 
++  private async datasetStorage(setup: StoreSetup): Promise<BinaryStorage | null> {
++    if (!setup.persisted) return null;
++    return scopeStorage(await (this.root ??= this.options.storage()), 'v7', 'datasets', setup.url, `s${setup.schema.version}`);
++  }
++
++  private async saveDataset(setup: StoreSetup, rows: Rows): Promise<void> {
++    try {
++      const storage = await this.datasetStorage(setup);
++      if (!storage) return;
++      await storage.write(DATASET_FILE, cellsToIpc(setup.schema, rows));
++      await storage.write(MARKER_FILE, new TextEncoder().encode(JSON.stringify({ url: setup.url, schemaVersion: setup.schema.version, syncedAt: this.now() })));
++    } catch (e) {
++      this.persistenceFailed(setup.name, e);
++    }
++  }
++
++  private async readDataset(setup: StoreSetup): Promise<{ rows: Rows; syncedAt: number | null } | null> {
++    try {
++      const storage = await this.datasetStorage(setup);
++      const bytes = await storage?.read(DATASET_FILE);
++      if (!storage || !bytes) return null;
++      const marker = await storage.read(MARKER_FILE);
++      const syncedAt = marker ? (JSON.parse(new TextDecoder().decode(marker)) as SyncMarker).syncedAt ?? null : null;
++      return { rows: ipcToRows(bytes, setup.schema), syncedAt };
++    } catch {
++      return null;
++    }
++  }
++
+   private async readMarker(store: HostedStore): Promise<SyncMarker | null> {
+     try {
+       const bytes = await store.storage?.read(MARKER_FILE);
+Index: frontend/apps/client-repo-ui/src/i18n/en/accounts.ts
+IDEA additional info:
+Subsystem: com.intellij.openapi.diff.impl.patch.CharsetEP
+<+>UTF-8
+===================================================================
+diff --git a/frontend/apps/client-repo-ui/src/i18n/en/accounts.ts b/frontend/apps/client-repo-ui/src/i18n/en/accounts.ts
+--- a/frontend/apps/client-repo-ui/src/i18n/en/accounts.ts	(revision 3aed2026fb215c551d310afeac959f58ba03daa0)
++++ b/frontend/apps/client-repo-ui/src/i18n/en/accounts.ts	(date 1795167467822)
+@@ -6,4 +6,8 @@
+   hideSearch: 'Hide search',
+   showSearch: 'Show search',
+   requestFailed: 'Request failed',
++  persistChanges: 'Keep changes offline',
++  persistChangesOnHint: 'Unsaved changes are stored in this browser and restored when the page reopens',
++  persistChangesOffHint: 'Unsaved changes are lost when the page reloads or reopens',
++  cachedData: 'Offline · cached data from {at}',
+ } satisfies Messages;
+Index: frontend/apps/client-repo-ui/src/data/accountWorkspace.ts
+IDEA additional info:
+Subsystem: com.intellij.openapi.diff.impl.patch.CharsetEP
+<+>UTF-8
+===================================================================
+diff --git a/frontend/apps/client-repo-ui/src/data/accountWorkspace.ts b/frontend/apps/client-repo-ui/src/data/accountWorkspace.ts
+--- a/frontend/apps/client-repo-ui/src/data/accountWorkspace.ts	(revision 3aed2026fb215c551d310afeac959f58ba03daa0)
++++ b/frontend/apps/client-repo-ui/src/data/accountWorkspace.ts	(date 1795167467823)
+@@ -7,12 +7,12 @@
+   lifecycle: {
+     evictOnClose: false,
+     close: { warnOnUnsavedChanges: true, clearMemoryOnClose: true },
+-    refresh: { warnOnUnsavedChanges: true, strategy: 'replace' },
++    refresh: { strategy: 'merge' },
+   },
+   defaults: {
+-    loading: { onOpen: 'cache-first', onRefresh: 'network-only', parallel: true, maxConcurrency: 4 },
++    loading: { onOpen: 'cache-then-network', onRefresh: 'network-only', parallel: true, maxConcurrency: 4 },
+     storage: { mode: 'worker-arrow', persisted: true },
+   },
+-  stores: [{ name: 'accounts', api: accountsApi, storage: { mode: 'worker-arrow', persisted: true } }],
++  stores: [{ name: 'accounts', api: accountsApi, storage: { mode: 'worker-arrow', persisted: true }, changes: { persisted: true } }],
+   apis: { updateAll: { api: accountsUpdateAllApi, confirmationRequired: true } },
+ });
+Index: frontend/packages/workspace/src/stores/config.ts
+IDEA additional info:
+Subsystem: com.intellij.openapi.diff.impl.patch.CharsetEP
+<+>UTF-8
+===================================================================
+diff --git a/frontend/packages/workspace/src/stores/config.ts b/frontend/packages/workspace/src/stores/config.ts
+--- a/frontend/packages/workspace/src/stores/config.ts	(revision 3aed2026fb215c551d310afeac959f58ba03daa0)
++++ b/frontend/packages/workspace/src/stores/config.ts	(date 1795167454627)
+@@ -2,7 +2,7 @@
+ import type { DatasetApi, DtoOf, UpdateAllApi } from '@dec/client-api';
+ 
+ export type StorageMode = 'javascript' | 'arrow' | 'worker-arrow';
+-export type LoadPolicy = 'cache-first' | 'network-only';
++export type LoadPolicy = 'cache-first' | 'cache-then-network' | 'network-only';
+ export type FieldType = 'autocomplete' | 'selection';
+ 
+ export interface StorageConfig {
+@@ -15,6 +15,7 @@
+   name: string;
+   api: DatasetApi;
+   storage?: StorageConfig;
++  changes?: { persisted?: boolean };
+ }
+ 
+ export interface FieldConfig {
+@@ -40,7 +41,7 @@
+   lifecycle?: {
+     evictOnClose?: boolean;
+     close?: { warnOnUnsavedChanges?: boolean; clearMemoryOnClose?: boolean };
+-    refresh?: { warnOnUnsavedChanges?: boolean; strategy?: 'replace' };
++    refresh?: { warnOnUnsavedChanges?: boolean; strategy?: 'replace' | 'merge' };
+     changes?: { persisted?: boolean };
+   };
+   defaults?: {
+@@ -59,6 +60,7 @@
+   api: string;
+   mode: StorageMode;
+   persisted: boolean;
++  persistChanges: boolean;
+   maxAgeMs: number | null;
+ }
+ 
+@@ -104,7 +106,7 @@
+ }
+ 
+ const MODES: readonly StorageMode[] = ['javascript', 'arrow', 'worker-arrow'];
+-const POLICIES: readonly LoadPolicy[] = ['cache-first', 'network-only'];
++const POLICIES: readonly LoadPolicy[] = ['cache-first', 'cache-then-network', 'network-only'];
+ 
+ export const WORKSPACE_DEFAULTS = {
+   onOpen: 'cache-first' as LoadPolicy,
+@@ -136,7 +138,7 @@
+   if (loading.onRefresh && loading.onRefresh !== 'network-only') issues.push('defaults.loading.onRefresh must be "network-only"');
+   if (loading.maxConcurrency !== undefined && !(Number.isInteger(loading.maxConcurrency) && loading.maxConcurrency >= 1)) issues.push('defaults.loading.maxConcurrency must be an integer >= 1');
+   if (defaults.storage?.mode && !MODES.includes(defaults.storage.mode)) issues.push(`defaults.storage.mode "${defaults.storage.mode}" is not supported`);
+-  if (config.lifecycle?.refresh?.strategy && config.lifecycle.refresh.strategy !== 'replace') issues.push('lifecycle.refresh.strategy must be "replace"');
++  if (config.lifecycle?.refresh?.strategy && !['replace', 'merge'].includes(config.lifecycle.refresh.strategy)) issues.push('lifecycle.refresh.strategy must be "replace" or "merge"');
+ 
+   const stores: ResolvedStoreConfig[] = [];
+   const storeNames = new Set<string>();
+@@ -157,7 +159,7 @@
+     else if (!api.complete) issues.push(`store "${store.name}": api "${url}" returns partial results and cannot back a store`);
+     const maxAgeMs = store.storage?.maxAgeMs ?? defaults.storage?.maxAgeMs ?? null;
+     if (maxAgeMs !== null && !isPositive(maxAgeMs)) issues.push(`store "${store.name}": storage.maxAgeMs must be a positive number`);
+-    stores.push({ name: store.name, api: url, mode, persisted: store.storage?.persisted ?? defaults.storage?.persisted ?? WORKSPACE_DEFAULTS.persisted, maxAgeMs });
++    stores.push({ name: store.name, api: url, mode, persisted: store.storage?.persisted ?? defaults.storage?.persisted ?? WORKSPACE_DEFAULTS.persisted, persistChanges: store.changes?.persisted ?? config.lifecycle?.changes?.persisted ?? true, maxAgeMs });
+   }
+ 
+   const fields: ResolvedFieldConfig[] = [];
+@@ -207,7 +209,7 @@
+     name: config.name,
+     evictOnClose: config.lifecycle?.evictOnClose ?? false,
+     warnOnClose: config.lifecycle?.close?.warnOnUnsavedChanges ?? true,
+-    warnOnRefresh: config.lifecycle?.refresh?.warnOnUnsavedChanges ?? true,
++    warnOnRefresh: config.lifecycle?.refresh?.strategy !== 'merge' && (config.lifecycle?.refresh?.warnOnUnsavedChanges ?? true),
+     persistChanges: config.lifecycle?.changes?.persisted ?? true,
+     onOpen: loading.onOpen ?? WORKSPACE_DEFAULTS.onOpen,
+     maxConcurrency: loading.parallel === false ? 1 : (loading.maxConcurrency ?? WORKSPACE_DEFAULTS.maxConcurrency),
+Index: frontend/packages/workspace/src/stores/react/index.ts
+IDEA additional info:
+Subsystem: com.intellij.openapi.diff.impl.patch.CharsetEP
+<+>UTF-8
+===================================================================
+diff --git a/frontend/packages/workspace/src/stores/react/index.ts b/frontend/packages/workspace/src/stores/react/index.ts
+--- a/frontend/packages/workspace/src/stores/react/index.ts	(revision 3aed2026fb215c551d310afeac959f58ba03daa0)
++++ b/frontend/packages/workspace/src/stores/react/index.ts	(date 1795167454629)
+@@ -1,6 +1,6 @@
+ export { StoreWorkspaceProvider, useStoreWorkspace } from './context.tsx';
+ export type { StoreWorkspaceProviderProps } from './context.tsx';
+-export { useDirtyState, useRow, useStore, useStoreChanges, useStoreQuery, useStoreState, useWorkspaceActions, useWorkspacePhase } from './hooks.ts';
++export { useChangePersistence, useDirtyState, useRow, useStore, useStoreChanges, useStoreQuery, useStoreState, useWorkspaceActions, useWorkspacePhase } from './hooks.ts';
+ export type { StoreQueryState, WorkspaceActions } from './hooks.ts';
+ export { useAutocomplete, useSelection } from './fieldHooks.ts';
+ export type { AutocompleteState, SelectionState } from './fieldHooks.ts';
+Index: frontend/apps/client-repo-ui/src/i18n/en/shell.ts
+IDEA additional info:
+Subsystem: com.intellij.openapi.diff.impl.patch.CharsetEP
+<+>UTF-8
+===================================================================
+diff --git a/frontend/apps/client-repo-ui/src/i18n/en/shell.ts b/frontend/apps/client-repo-ui/src/i18n/en/shell.ts
+--- a/frontend/apps/client-repo-ui/src/i18n/en/shell.ts	(revision 3aed2026fb215c551d310afeac959f58ba03daa0)
++++ b/frontend/apps/client-repo-ui/src/i18n/en/shell.ts	(date 1795170005781)
+@@ -63,6 +63,12 @@
+     fullscreen: 'Toggle full screen',
+     closeWindow: 'Close window',
+   },
++  reload: {
++    title: 'Reload the page?',
++    description: 'Some data may be lost. Unsaved changes in your open workspaces will not be kept.',
++    confirm: 'Reload',
++    cancel: 'Stay on page',
++  },
+   window: {
+     controls: 'Window controls',
+     minimize: 'Minimize',
+Index: frontend/apps/client-repo-ui/src/i18n/fr/shell.ts
+IDEA additional info:
+Subsystem: com.intellij.openapi.diff.impl.patch.CharsetEP
+<+>UTF-8
+===================================================================
+diff --git a/frontend/apps/client-repo-ui/src/i18n/fr/shell.ts b/frontend/apps/client-repo-ui/src/i18n/fr/shell.ts
+--- a/frontend/apps/client-repo-ui/src/i18n/fr/shell.ts	(revision 3aed2026fb215c551d310afeac959f58ba03daa0)
++++ b/frontend/apps/client-repo-ui/src/i18n/fr/shell.ts	(date 1795170005781)
+@@ -64,6 +64,12 @@
+     fullscreen: 'Basculer en plein écran',
+     closeWindow: 'Fermer la fenêtre',
+   },
++  reload: {
++    title: 'Recharger la page ?',
++    description: 'Certaines données peuvent être perdues. Les modifications non enregistrées de vos espaces ouverts ne seront pas conservées.',
++    confirm: 'Recharger',
++    cancel: 'Rester sur la page',
++  },
+   window: {
+     controls: 'Contrôles de la fenêtre',
+     minimize: 'Réduire',
+Index: frontend/apps/client-repo-ui/src/pages/accounts/SearchAccountPage.tsx
+IDEA additional info:
+Subsystem: com.intellij.openapi.diff.impl.patch.CharsetEP
+<+>UTF-8
+===================================================================
+diff --git a/frontend/apps/client-repo-ui/src/pages/accounts/SearchAccountPage.tsx b/frontend/apps/client-repo-ui/src/pages/accounts/SearchAccountPage.tsx
+--- a/frontend/apps/client-repo-ui/src/pages/accounts/SearchAccountPage.tsx	(revision 3aed2026fb215c551d310afeac959f58ba03daa0)
++++ b/frontend/apps/client-repo-ui/src/pages/accounts/SearchAccountPage.tsx	(date 1795167467821)
+@@ -1,11 +1,11 @@
+-import { useT } from '@dec/i18n/react';
++import { useLocale, useT } from '@dec/i18n/react';
+ import { messages } from '../../i18n/index.ts';
+ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+-import { PanelTopClose, PanelTopOpen, UserSearch } from 'lucide-react';
++import { CloudOff, HardDrive, HardDriveDownload, PanelTopClose, PanelTopOpen, UserSearch } from 'lucide-react';
+ import { DataGrid, createRowEditProvider } from '@dec/grid-react';
+ import { GenericSearch, type GenericSearchProps, type SearchStatus } from '@dec/ui/search';
+ import { useTheme } from '@dec/ui';
+-import { StoreWorkspaceProvider, useStore, useStoreState, useWorkspaceActions, useWorkspaceHandle } from '@dec/workspace';
++import { StoreWorkspaceProvider, useChangePersistence, useStore, useStoreState, useWorkspaceActions, useWorkspaceHandle } from '@dec/workspace';
+ import { accountsSchema, rolesSchema } from '@dec/cr-factory';
+ import type { Account } from '@dec/client-api';
+ import { toSearchMetadata } from '../../search/tables.ts';
+@@ -57,8 +57,13 @@
+   const query = useRef<SearchQuery>(undefined);
+   const { theme } = useTheme();
+   const accounts = useStore<Account>('accounts');
+-  const { status: loadStatus } = useStoreState('accounts');
++  const { status: loadStatus, error: loadError, lastSyncAt } = useStoreState('accounts');
++  const locale = useLocale();
++  const offlineSince = loadStatus === 'ready' && loadError && lastSyncAt !== null
++    ? new Intl.DateTimeFormat(locale, { dateStyle: 'short', timeStyle: 'medium' }).format(lastSyncAt)
++    : null;
+   const { refresh, updateAll } = useWorkspaceActions();
++  const [persistChanges, setPersistChanges] = useChangePersistence('accounts');
+   const grid = useMemo(() => accounts.gridBinding(), [accounts]);
+   const metadata = useMemo(() => toSearchMetadata(searchDef.toMergedSchema()), [searchDef]);
+ 
+@@ -110,10 +115,28 @@
+         title={t('app.routes.accounts.label')}
+         description={t('accounts.description')}
+         actions={
++          <>
++          {offlineSince && (
++            <span className="page-cache-badge" title={loadError ?? undefined}>
++              <CloudOff size={13} />
++              {t('accounts.cachedData', { at: offlineSince })}
++            </span>
++          )}
++          <button
++            type="button"
++            className="page-toggle"
++            aria-pressed={persistChanges}
++            title={t(persistChanges ? 'accounts.persistChangesOnHint' : 'accounts.persistChangesOffHint')}
++            onClick={() => setPersistChanges(!persistChanges)}
++          >
++            {persistChanges ? <HardDriveDownload size={14} /> : <HardDrive size={14} />}
++            {t('accounts.persistChanges')}
++          </button>
+           <button type="button" className="page-toggle" aria-pressed={searchVisible} onClick={() => setSearchVisible((v) => !v)}>
+             <ToggleIcon size={14} />
+             {t(searchVisible ? 'accounts.hideSearch' : 'accounts.showSearch')}
+           </button>
++          </>
+         }
+       />
+       <div className="search-page">
+Index: frontend/apps/client-repo-ui/src/shell/ReloadGuard.tsx
+IDEA additional info:
+Subsystem: com.intellij.openapi.diff.impl.patch.CharsetEP
+<+>UTF-8
+===================================================================
+diff --git a/frontend/apps/client-repo-ui/src/shell/ReloadGuard.tsx b/frontend/apps/client-repo-ui/src/shell/ReloadGuard.tsx
+new file mode 100644
+--- /dev/null	(date 1795170486263)
++++ b/frontend/apps/client-repo-ui/src/shell/ReloadGuard.tsx	(date 1795170486263)
+@@ -0,0 +1,38 @@
++import { useT } from '@dec/i18n/react';
++import { useEffect, useState } from 'react';
++import { ConfirmDialog } from '@dec/ui';
++import { reloadWithoutPrompt } from '@dec/workspace';
++import { messages } from '../i18n/index.ts';
++
++const isReloadShortcut = (e: KeyboardEvent) =>
++  e.key === 'F5' || ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'r');
++
++export function ReloadGuard() {
++  const t = useT(messages);
++  const [open, setOpen] = useState(false);
++
++  useEffect(() => {
++    const onKeyDown = (e: KeyboardEvent) => {
++      if (!isReloadShortcut(e)) return;
++      e.preventDefault();
++      e.stopPropagation();
++      setOpen(true);
++    };
++    window.addEventListener('keydown', onKeyDown, true);
++    return () => window.removeEventListener('keydown', onKeyDown, true);
++  }, []);
++
++  return (
++    <ConfirmDialog
++      open={open}
++      onOpenChange={setOpen}
++      tone="danger"
++      centered
++      title={t('shell.reload.title')}
++      description={t('shell.reload.description')}
++      confirmLabel={t('shell.reload.confirm')}
++      cancelLabel={t('shell.reload.cancel')}
++      onConfirm={reloadWithoutPrompt}
++    />
++  );
++}
+Index: frontend/apps/client-repo-ui/src/shell/AppShell.tsx
+IDEA additional info:
+Subsystem: com.intellij.openapi.diff.impl.patch.CharsetEP
+<+>UTF-8
+===================================================================
+diff --git a/frontend/apps/client-repo-ui/src/shell/AppShell.tsx b/frontend/apps/client-repo-ui/src/shell/AppShell.tsx
+--- a/frontend/apps/client-repo-ui/src/shell/AppShell.tsx	(revision 3aed2026fb215c551d310afeac959f58ba03daa0)
++++ b/frontend/apps/client-repo-ui/src/shell/AppShell.tsx	(date 1795170005775)
+@@ -10,6 +10,7 @@
+ import { TitleBar } from './titlebar/TitleBar.tsx';
+ import { OVERVIEW_SHORTCUT, Thumbnail, WorkspaceOverview } from './overview/WorkspaceOverview.tsx';
+ import { captureWorkspace, getSnapshot } from './overview/snapshots.ts';
++import { ReloadGuard } from './ReloadGuard.tsx';
+ import './shell.css';
+ 
+ const renderIcon = (name: string) => {
+@@ -96,6 +97,7 @@
+         statusBar={{ left: <ToolWindowButtons />, shortcuts: { next: false }, renderMinimizedPreview }}
+         className="app-layout"
+       />
++      <ReloadGuard />
+     </div>
+   );
+ }
+Index: frontend/apps/client-repo-ui/src/i18n/fr/accounts.ts
+IDEA additional info:
+Subsystem: com.intellij.openapi.diff.impl.patch.CharsetEP
+<+>UTF-8
+===================================================================
+diff --git a/frontend/apps/client-repo-ui/src/i18n/fr/accounts.ts b/frontend/apps/client-repo-ui/src/i18n/fr/accounts.ts
+--- a/frontend/apps/client-repo-ui/src/i18n/fr/accounts.ts	(revision 3aed2026fb215c551d310afeac959f58ba03daa0)
++++ b/frontend/apps/client-repo-ui/src/i18n/fr/accounts.ts	(date 1795167467822)
+@@ -7,4 +7,8 @@
+   hideSearch: 'Masquer la recherche',
+   showSearch: 'Afficher la recherche',
+   requestFailed: 'La requête a échoué',
++  persistChanges: 'Conserver les modifications',
++  persistChangesOnHint: 'Les modifications non enregistrées sont stockées dans ce navigateur et restaurées à la réouverture',
++  persistChangesOffHint: 'Les modifications non enregistrées sont perdues au rechargement ou à la réouverture',
++  cachedData: 'Hors ligne · données en cache du {at}',
+ };
+Index: frontend/apps/client-repo-ui/src/shell/shell.css
+IDEA additional info:
+Subsystem: com.intellij.openapi.diff.impl.patch.CharsetEP
+<+>UTF-8
+===================================================================
+diff --git a/frontend/apps/client-repo-ui/src/shell/shell.css b/frontend/apps/client-repo-ui/src/shell/shell.css
+--- a/frontend/apps/client-repo-ui/src/shell/shell.css	(revision 3aed2026fb215c551d310afeac959f58ba03daa0)
++++ b/frontend/apps/client-repo-ui/src/shell/shell.css	(date 1795159401104)
+@@ -192,6 +192,11 @@
+ .page-header-title { margin: 0; font-size: 15.5px; font-weight: 650; letter-spacing: -0.015em; line-height: 1.25; }
+ .page-header-desc { margin: 2px 0 0; font-size: 12px; color: var(--ui-text-3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+ .page-header-actions { flex: none; display: flex; align-items: center; gap: 6px; }
++.page-cache-badge {
++  display: inline-flex; align-items: center; gap: 6px; height: 26px; padding: 0 10px; border-radius: 999px;
++  font-size: 11.5px; font-weight: 550; white-space: nowrap;
++  color: var(--ui-warning); background: var(--ui-warning-soft);
++}
+ .page-header-extra { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+ 
+ .page-scroll { flex: 1; min-height: 0; overflow: auto; }
+Index: frontend/packages/workspace/src/react/hooks/useBeforeUnloadGuard.ts
+IDEA additional info:
+Subsystem: com.intellij.openapi.diff.impl.patch.CharsetEP
+<+>UTF-8
+===================================================================
+diff --git a/frontend/packages/workspace/src/react/hooks/useBeforeUnloadGuard.ts b/frontend/packages/workspace/src/react/hooks/useBeforeUnloadGuard.ts
+--- a/frontend/packages/workspace/src/react/hooks/useBeforeUnloadGuard.ts	(revision 3aed2026fb215c551d310afeac959f58ba03daa0)
++++ b/frontend/packages/workspace/src/react/hooks/useBeforeUnloadGuard.ts	(date 1795170314586)
+@@ -2,6 +2,13 @@
+ import type { IWorkspaceManager } from '../../types/WorkspaceManagerApi.ts';
+ import { useManagerSelector } from '../store.ts';
+ 
++let unloadAllowed = false;
++
++export function reloadWithoutPrompt(): void {
++  unloadAllowed = true;
++  window.location.reload();
++}
++
+ export function useBeforeUnloadGuard(
+   manager: IWorkspaceManager,
+   onError: (e: unknown, ctx: { phase: string }) => void,
+@@ -14,6 +21,7 @@
+   useEffect(() => {
+     if (!enabled || !anyDirty || typeof window === 'undefined') return undefined;
+     const handler = (e: BeforeUnloadEvent): void => {
++      if (unloadAllowed) return;
+       e.preventDefault();
+       e.returnValue = '';
+     };
+Index: frontend/packages/workspace/src/stores/StoreWorkspace.ts
+IDEA additional info:
+Subsystem: com.intellij.openapi.diff.impl.patch.CharsetEP
+<+>UTF-8
+===================================================================
+diff --git a/frontend/packages/workspace/src/stores/StoreWorkspace.ts b/frontend/packages/workspace/src/stores/StoreWorkspace.ts
+--- a/frontend/packages/workspace/src/stores/StoreWorkspace.ts	(revision 3aed2026fb215c551d310afeac959f58ba03daa0)
++++ b/frontend/packages/workspace/src/stores/StoreWorkspace.ts	(date 1795167454628)
+@@ -3,6 +3,7 @@
+ import type { DatasetFetcher, UpdateAllStoreChanges } from '@dec/client-api';
+ import type { ProcessorEvent } from '@dec/grid';
+ import { mainStorage, sharedOwnership } from './shared.ts';
++import { readPersistChanges, writePersistChanges } from './changePreferences.ts';
+ import { resolveWorkspaceConfig } from './config.ts';
+ import type { ResolvedStoreConfig, ResolvedWorkspaceConfig, StoreDto, StoreNames, WorkspaceConfig } from './config.ts';
+ import { StoreWorkspaceError, isAbort, messageOf } from './errors.ts';
+@@ -88,6 +89,7 @@
+   private dirty: WorkspaceDirtyState = { ...CLEAN, stores: {}, dirtyStores: [] };
+   private prompts: WorkspacePrompts | null;
+   private lock: Ownership | null = null;
++  private cacheLock: Ownership | null = null;
+   private opening: Promise<void> | null = null;
+   private closing: Promise<void> | null = null;
+   private submitting: Promise<SaveOutcome> | null = null;
+@@ -171,6 +173,15 @@
+     return this.reload(targets, discardLocal, options.signal);
+   }
+ 
++  persistsChanges(store: string): boolean {
++    const config = this.config.stores.find((s) => s.name === store);
++    return readPersistChanges(this.id, store) ?? config?.persistChanges ?? this.config.persistChanges;
++  }
++
++  setPersistChanges(store: string, enabled: boolean): void {
++    writePersistChanges(this.id, store, enabled);
++  }
++
+   refreshStores(names: string[]): Promise<RefreshResult> {
+     return this.refresh(names);
+   }
+@@ -263,6 +274,7 @@
+       throw new StoreWorkspaceError('OWNED_ELSEWHERE', `workspace "${this.id}" is already open in another tab or view`);
+     }
+     this.lock = lock;
++    this.cacheLock = await ownership.acquire(`dec-store-cache:${this.id}`);
+     const { runtime } = this;
+     const wantsWorker = this.config.stores.some((s) => s.mode === 'worker-arrow');
+     const canWorker = wantsWorker && !runtime.fetcher && (!!runtime.createWorker || typeof Worker !== 'undefined');
+@@ -313,9 +325,9 @@
+           schema: store.schema,
+           engine: config.mode === 'javascript' ? 'js' : 'arrow',
+           persisted: config.persisted,
+-          persistChanges: this.config.persistChanges,
++          persistChanges: this.persistsChanges(config.name),
+           maxAgeMs: config.maxAgeMs,
+-          scope: ['v7', this.id, this.instanceKey, 'stores', config.name],
++          scope: ['v7', this.id, this.cacheLock ? 'shared' : this.instanceKey, 'stores', config.name],
+         },
+       });
+       await link.send({ type: 'load', store: config.name, policy: this.config.onOpen, discardLocal: false });
+@@ -410,6 +422,8 @@
+     await Promise.allSettled([...this.stores.keys()].map((name) => this.linkOf(name).send({ type: 'detach', store: name, evict })));
+     for (const link of this.links) link.dispose();
+     this.links.length = 0;
++    await this.cacheLock?.release().catch(() => undefined);
++    this.cacheLock = null;
+     await this.lock?.release().catch(() => undefined);
+     this.lock = null;
+     this.setPhase('closed');
+Index: frontend/packages/workspace/src/stores/changePreferences.ts
+IDEA additional info:
+Subsystem: com.intellij.openapi.diff.impl.patch.CharsetEP
+<+>UTF-8
+===================================================================
+diff --git a/frontend/packages/workspace/src/stores/changePreferences.ts b/frontend/packages/workspace/src/stores/changePreferences.ts
+new file mode 100644
+--- /dev/null	(date 1795167440810)
++++ b/frontend/packages/workspace/src/stores/changePreferences.ts	(date 1795167440810)
+@@ -0,0 +1,27 @@
++const PREFIX = 'dec-store-persist-changes:';
++const listeners = new Set<() => void>();
++
++const keyOf = (workspaceId: string, store: string): string => `${PREFIX}${workspaceId}:${store}`;
++
++export function readPersistChanges(workspaceId: string, store: string): boolean | null {
++  try {
++    const value = globalThis.localStorage?.getItem(keyOf(workspaceId, store));
++    return value === null || value === undefined ? null : value === 'true';
++  } catch {
++    return null;
++  }
++}
++
++export function writePersistChanges(workspaceId: string, store: string, enabled: boolean): void {
++  try {
++    globalThis.localStorage?.setItem(keyOf(workspaceId, store), String(enabled));
++  } catch {
++    return;
++  }
++  for (const listener of [...listeners]) listener();
++}
++
++export function subscribePersistChanges(listener: () => void): () => void {
++  listeners.add(listener);
++  return () => void listeners.delete(listener);
++}
+Index: frontend/packages/workspace/src/react/index.ts
+IDEA additional info:
+Subsystem: com.intellij.openapi.diff.impl.patch.CharsetEP
+<+>UTF-8
+===================================================================
+diff --git a/frontend/packages/workspace/src/react/index.ts b/frontend/packages/workspace/src/react/index.ts
+--- a/frontend/packages/workspace/src/react/index.ts	(revision 3aed2026fb215c551d310afeac959f58ba03daa0)
++++ b/frontend/packages/workspace/src/react/index.ts	(date 1795170314587)
+@@ -28,7 +28,7 @@
+ export { useWorkspaceHandle } from './hooks/useWorkspaceHandle.ts';
+ export { useWorkspaces, useWorkspaceInstance, useActiveWorkspaceId } from './hooks/useWorkspaces.ts';
+ export { useLayout } from './hooks/useLayout.ts';
+-export { useBeforeUnloadGuard } from './hooks/useBeforeUnloadGuard.ts';
++export { reloadWithoutPrompt, useBeforeUnloadGuard } from './hooks/useBeforeUnloadGuard.ts';
+ export { useMemoryMonitor } from './hooks/useMemoryMonitor.ts';
+ export { useArrowTable } from './hooks/useArrowTable.ts';
+ export { ActivityBar } from './ActivityBar.tsx';
+Index: frontend/packages/workspace/src/stores/react/hooks.ts
+IDEA additional info:
+Subsystem: com.intellij.openapi.diff.impl.patch.CharsetEP
+<+>UTF-8
+===================================================================
+diff --git a/frontend/packages/workspace/src/stores/react/hooks.ts b/frontend/packages/workspace/src/stores/react/hooks.ts
+--- a/frontend/packages/workspace/src/stores/react/hooks.ts	(revision 3aed2026fb215c551d310afeac959f58ba03daa0)
++++ b/frontend/packages/workspace/src/stores/react/hooks.ts	(date 1795167454629)
+@@ -6,6 +6,7 @@
+ import type { RowKey, Store, StoreChangesPage, StoreQuery, StoreQueryResult } from '../Store.ts';
+ import type { RefreshOptions, RefreshResult, WorkspaceDirtyState, WorkspacePhase } from '../StoreWorkspace.ts';
+ import { useStoreWorkspace } from './context.tsx';
++import { subscribePersistChanges } from '../changePreferences.ts';
+ 
+ export function useStore<T = RowRecord>(name: string): Store<T> {
+   const workspace = useStoreWorkspace();
+@@ -124,6 +125,14 @@
+   return useSyncExternalStore(useCallback((listener) => workspace.subscribeDirty(listener), [workspace]), read, read);
+ }
+ 
++export function useChangePersistence(name: string): [boolean, (enabled: boolean) => void] {
++  const workspace = useStoreWorkspace();
++  const read = (): boolean => workspace.persistsChanges(name);
++  const enabled = useSyncExternalStore(subscribePersistChanges, read, read);
++  const set = useCallback((value: boolean) => workspace.setPersistChanges(name, value), [workspace, name]);
++  return [enabled, set];
++}
++
+ export function useWorkspacePhase(): { phase: WorkspacePhase; isSaving: boolean } {
+   const workspace = useStoreWorkspace();
+   const read = (): string => `${workspace.phase}:${workspace.isSaving}`;
+Index: frontend/packages/ui/src/components/overlays/Dialog.tsx
+IDEA additional info:
+Subsystem: com.intellij.openapi.diff.impl.patch.CharsetEP
+<+>UTF-8
+===================================================================
+diff --git a/frontend/packages/ui/src/components/overlays/Dialog.tsx b/frontend/packages/ui/src/components/overlays/Dialog.tsx
+--- a/frontend/packages/ui/src/components/overlays/Dialog.tsx	(revision 3aed2026fb215c551d310afeac959f58ba03daa0)
++++ b/frontend/packages/ui/src/components/overlays/Dialog.tsx	(date 1795170486261)
+@@ -23,6 +23,7 @@
+   className?: string;
+   bodyClassName?: string;
+   role?: 'dialog' | 'alertdialog';
++  centered?: boolean;
+   'aria-label'?: string;
+ }
+ 
+@@ -50,6 +51,7 @@
+   className,
+   bodyClassName,
+   role = 'dialog',
++  centered = false,
+   'aria-label': ariaLabel,
+   forwardedRef,
+ }: DialogProps & { forwardedRef: ForwardedRef<HTMLDivElement> }) {
+@@ -70,7 +72,7 @@
+ 
+   return (
+     <div
+-      className="fixed inset-0 z-[900] flex items-start justify-center overflow-y-auto px-4 pb-8 pt-[12vh]"
++      className={cn('fixed inset-0 z-[900] flex justify-center overflow-y-auto px-4', centered ? 'items-center py-8' : 'items-start pb-8 pt-[12vh]')}
+       onKeyDown={onKeyDown}
+       onPointerDown={(e) => {
+         if (closeOnBackdrop && e.target === e.currentTarget && e.button === 0) onOpenChange(false);
+Index: frontend/packages/ui/src/components/overlays/ConfirmDialog.tsx
+IDEA additional info:
+Subsystem: com.intellij.openapi.diff.impl.patch.CharsetEP
+<+>UTF-8
+===================================================================
+diff --git a/frontend/packages/ui/src/components/overlays/ConfirmDialog.tsx b/frontend/packages/ui/src/components/overlays/ConfirmDialog.tsx
+--- a/frontend/packages/ui/src/components/overlays/ConfirmDialog.tsx	(revision 3aed2026fb215c551d310afeac959f58ba03daa0)
++++ b/frontend/packages/ui/src/components/overlays/ConfirmDialog.tsx	(date 1795170486261)
+@@ -17,6 +17,7 @@
+   cancelLabel?: ReactNode;
+   onConfirm: () => void | Promise<unknown>;
+   onCancel?: () => void;
++  centered?: boolean;
+ }
+ 
+ export function ConfirmDialog({
+@@ -30,6 +31,7 @@
+   cancelLabel: cancelLabelProp,
+   onConfirm,
+   onCancel,
++  centered,
+ }: ConfirmDialogProps) {
+   const t = useT(messages);
+   const confirmLabel = confirmLabelProp ?? t('common.confirm');
+@@ -70,6 +72,7 @@
+       onOpenChange={change}
+       size="sm"
+       role="alertdialog"
++      centered={centered}
+       showClose={false}
+       closeOnBackdrop={!loading}
+       title={
