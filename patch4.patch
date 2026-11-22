@@ -320,7 +320,7 @@ diff --git a/frontend/packages/ui/src/components/date-time/Calendar.tsx b/fronte
 +++ b/frontend/packages/ui/src/components/date-time/Calendar.tsx	(date 1795326192838)
 @@ -266,7 +266,7 @@
    };
- 
+
    const captionBtn = 'rounded-[5px] px-1.5 py-0.5 font-medium text-primary outline-none hover:bg-hover focus-visible:ring-2 focus-visible:ring-focus disabled:pointer-events-none';
 -  const pickBtn = (current: boolean, selected: boolean) =>
 +  const pickerButtonClass = (current: boolean, selected: boolean) =>
@@ -358,7 +358,7 @@ diff --git a/frontend/apps/client-repo-ui/src/app/App.tsx b/frontend/apps/client
 +import { CacheProvider } from '@dec/cache-react';
  import { AppShell } from '../shell/AppShell.tsx';
 +import { cacheClient } from '../cache/client.ts';
- 
+
  export function App() {
    return (
      <ThemeProvider defaultTheme="dark">
@@ -429,7 +429,7 @@ diff --git a/frontend/packages/client-api/src/registry.ts b/frontend/packages/cl
 +import { accountsSchema, currenciesSchema, rolesSchema } from '@dec/cr-factory';
  import type { Account } from './account/types.ts';
  import type { UpdateAllRequest, UpdateAllResponse } from './updateAll.ts';
- 
+
 @@ -80,3 +80,27 @@
    mainColumns: ['accountId', 'beneficiary', 'currencyIsoCode'],
    schema: accountsSchema,
@@ -482,11 +482,11 @@ diff --git a/frontend/packages/client-api/src/dataset.ts b/frontend/packages/cli
 @@ -1,4 +1,4 @@
 -import { ApiRequestError, apiUrl } from './http.ts';
 +import { ApiRequestError, apiUrl, fetchReporting, reportApiFailure } from './http.ts';
- 
+
  export const ARROW_STREAM = 'application/vnd.apache.arrow.stream';
- 
+
 @@ -18,8 +18,12 @@
- 
+
  export const fetchDataset: DatasetFetcher = async (url, { signal, params }) => {
    const query = params && Object.keys(params).length ? `?${new URLSearchParams(params)}` : '';
 -  const res = await fetch(`${apiUrl(url)}${query}`, { signal, headers: { Accept: `${ARROW_STREAM}, application/json;q=0.9` } });
@@ -536,14 +536,14 @@ diff --git a/frontend/packages/workspace/src/stores/HostServer.ts b/frontend/pac
 @@ -60,7 +60,7 @@
    return { name: error?.name ?? 'Error', message: error?.message ?? String(e), ...(typeof error?.code === 'string' ? { code: error.code } : {}) };
  };
- 
+
 -const coreInit = (setup: StoreSetup): CoreInit => ({
 +const toCoreInit = (setup: StoreSetup): CoreInit => ({
    gridId: setup.name,
    cache: {} as CoreInit['cache'],
    retention: {},
 @@ -234,7 +234,7 @@
- 
+
    private async firstLoad(store: HostedStore, policy: LoadPolicy, signal: AbortSignal, stillWanted: () => void): Promise<Partial<StoreState>> {
      const { setup, host } = store;
 -    const init = coreInit(setup);
@@ -587,7 +587,7 @@ diff --git a/frontend/packages/workspace/src/stores/config.ts b/frontend/package
  import { resolveApi } from '@dec/client-api';
  import type { DatasetApi, DtoOf, UpdateAllApi } from '@dec/client-api';
 +import type { RefCache } from './refCaches.ts';
- 
+
  export type StorageMode = 'javascript' | 'arrow' | 'worker-arrow';
  export type LoadPolicy = 'cache-first' | 'cache-then-network' | 'network-only';
 @@ -52,6 +53,7 @@
@@ -597,7 +597,7 @@ diff --git a/frontend/packages/workspace/src/stores/config.ts b/frontend/package
 +  refCaches?: readonly RefCache[];
    apis?: { updateAll?: UpdateAllConfig };
  }
- 
+
 @@ -87,6 +89,7 @@
    maxConcurrency: number;
    stores: ResolvedStoreConfig[];
@@ -605,11 +605,11 @@ diff --git a/frontend/packages/workspace/src/stores/config.ts b/frontend/package
 +  refCaches: RefCache[];
    updateAll: { url: string; method: 'POST' | 'PUT' } | null;
  }
- 
+
 @@ -194,6 +197,18 @@
      });
    }
- 
+
 +  const refCaches: RefCache[] = [];
 +  const refCacheNames = new Set<string>();
 +  for (const [i, cache] of (config.refCaches ?? []).entries()) {
@@ -837,7 +837,7 @@ diff --git a/client-repository-api/client-repo-codegen/src/main/java/com/dbmappi
 +++ b/client-repository-api/client-repo-codegen/src/main/java/com/dbmapping/gen/TsDtoGenerator.java	(date 1795326192858)
 @@ -31,9 +31,9 @@
          sb.append("}\n\n");
- 
+
          sb.append("export const ").append(def).append(": TableMetaData = {\n");
 -        sb.append("  tableName: ").append(str(model.tableName().toUpperCase(Locale.ROOT))).append(",\n");
 +        sb.append("  tableName: ").append(quoted(model.tableName().toUpperCase(Locale.ROOT))).append(",\n");
@@ -849,7 +849,7 @@ diff --git a/client-repository-api/client-repo-codegen/src/main/java/com/dbmappi
          int position = 1;
 @@ -71,20 +71,20 @@
          Integer size = source != null ? source.size() : null;
- 
+
          sb.append("    {\n");
 -        sb.append("      field: ").append(str(property.getEscapedName())).append(",\n");
 -        sb.append("      type: ").append(str(model.tsFieldType(property))).append(",\n");
@@ -916,12 +916,12 @@ diff --git a/client-repository-api/client-repo-codegen/src/main/java/com/dbmappi
          sb.append("  ]");
 @@ -191,10 +191,10 @@
      }
- 
+
      private static String list(List<String> values) {
 -        return values.stream().map(TsDtoGenerator::str).collect(Collectors.joining(", ", "[", "]"));
 +        return values.stream().map(TsDtoGenerator::quoted).collect(Collectors.joining(", ", "[", "]"));
      }
- 
+
 -    private static String str(String value) {
 +    private static String quoted(String value) {
          return "\"" + value.replace("\\", "\\\\").replace("\"", "\\\"") + "\"";
@@ -938,7 +938,7 @@ diff --git a/frontend/packages/client-api/src/http.ts b/frontend/packages/client
 @@ -16,12 +16,43 @@
    }
  }
- 
+
 +export interface ApiFailure {
 +  status: number;
 +  message: string;
@@ -971,9 +971,9 @@ diff --git a/frontend/packages/client-api/src/http.ts b/frontend/packages/client
 +}
 +
  const BASE_URL: string = (import.meta as { env?: Record<string, string> }).env?.VITE_API_URL ?? '';
- 
+
  export const apiUrl = (path: string): string => `${BASE_URL}${path}`;
- 
+
  export async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
 -  const res = await fetch(`${BASE_URL}${path}`, {
 +  const res = await fetchReporting(path, `${BASE_URL}${path}`, {
@@ -1015,34 +1015,34 @@ diff --git a/frontend/packages/workspace/src/stores/StoreWorkspace.ts b/frontend
 --- a/frontend/packages/workspace/src/stores/StoreWorkspace.ts	(revision e0b1d73842738e04807c8c8601ecf7bda2b3a595)
 +++ b/frontend/packages/workspace/src/stores/StoreWorkspace.ts	(date 1795326192806)
 @@ -123,7 +123,7 @@
- 
+
    open(): Promise<void> {
      if (this.phaseValue === 'closing' || this.phaseValue === 'closed') return Promise.reject(new StoreWorkspaceError('CLOSED', `workspace "${this.id}" is closed`));
 -    return (this.opening ??= this.doOpen());
 +    return (this.opening ??= this.openStores());
    }
- 
+
    getStore<N extends StoreNames<C>>(name: N): Store<StoreDto<C, N>> {
 @@ -226,7 +226,7 @@
- 
+
    close(options: { discard?: boolean } = {}): Promise<void> {
      if (this.phaseValue === 'closed') return Promise.resolve();
 -    return (this.closing ??= this.doClose(options.discard ?? false));
 +    return (this.closing ??= this.closeStores(options.discard ?? false));
    }
- 
+
    private storeOf(name: string): StoreClient {
 @@ -264,7 +264,7 @@
      else console.error(`[@dec/workspace] ${this.id}${store ? `/${store}` : ''} ${phase}`, error);
    }
- 
+
 -  private async doOpen(): Promise<void> {
 +  private async openStores(): Promise<void> {
      this.setPhase('opening');
      const ownership = this.runtime.ownership ?? sharedOwnership;
      const lock = await ownership.acquire(`dec-store-ws:${this.id}:${this.instanceKey}`);
 @@ -361,7 +361,7 @@
- 
+
    private submit(targets: string[]): Promise<SaveOutcome> {
      if (this.submitting) return this.submitting;
 -    const run = this.doSubmit(targets);
@@ -1053,7 +1053,7 @@ diff --git a/frontend/packages/workspace/src/stores/StoreWorkspace.ts b/frontend
 @@ -376,7 +376,7 @@
      for (const listener of [...this.phaseListeners]) listener();
    }
- 
+
 -  private async doSubmit(targets: string[]): Promise<SaveOutcome> {
 +  private async submitTargets(targets: string[]): Promise<SaveOutcome> {
      const declared = this.config.updateAll as { url: string; method: 'POST' | 'PUT' };
@@ -1062,7 +1062,7 @@ diff --git a/frontend/packages/workspace/src/stores/StoreWorkspace.ts b/frontend
 @@ -410,7 +410,7 @@
      }
    }
- 
+
 -  private async doClose(discard: boolean): Promise<void> {
 +  private async closeStores(discard: boolean): Promise<void> {
      if (this.phaseValue === 'opening') await this.opening?.catch(() => undefined);
@@ -1413,10 +1413,10 @@ diff --git a/frontend/apps/client-repo-ui/src/pages/grid/GridPlaygroundPage.tsx 
 @@ -48,23 +48,23 @@
  })
  const rowEditFull = createRowEditProvider({ renderAs: 'FULL_ROW' })
- 
+
 -const txt = (v: CellValue | undefined) => (v === null || v === undefined ? '' : String(v))
 +const asText = (v: CellValue | undefined) => (v === null || v === undefined ? '' : String(v))
- 
+
  const expandable = createExpandableRowViewProvider((p) => (
    <div className="text-[13px]">
 -    <strong>{txt(p.rowData.firstName)} {txt(p.rowData.lastName)}</strong>
@@ -1425,10 +1425,10 @@ diff --git a/frontend/apps/client-repo-ui/src/pages/grid/GridPlaygroundPage.tsx 
 +    <span className="text-secondary"> · {asText(p.rowData.email)} · {asText(p.rowData.city)}</span>
    </div>
  ))
- 
+
 -const opts = (values: readonly string[]) => values.map((v) => ({ value: v, label: v }))
 +const toOptions = (values: readonly string[]) => values.map((v) => ({ value: v, label: v }))
- 
+
  function Option<V extends string>({ label, value, options, onChange, width = 120 }: { label: string; value: V; options: readonly V[]; onChange: (v: V) => void; width?: number }) {
    return (
      <label className="flex items-center gap-2">
@@ -1450,10 +1450,10 @@ diff --git a/frontend/apps/client-repo-ui/src/pages/home/sections/SettingsReview
 @@ -69,7 +69,7 @@
    );
  }
- 
+
 -const fmt = (v: unknown) => (v === null || v === undefined ? '∅' : String(v));
 +const formatValue = (v: unknown) => (v === null || v === undefined ? '∅' : String(v));
- 
+
  function ReviewDialog({ request, onClose }: { request: ApprovalRequest | null; onClose: () => void }) {
    const { toast } = useToast();
 @@ -165,15 +165,15 @@
@@ -1509,7 +1509,7 @@ diff --git a/frontend/packages/ui/src/components/persistable-flow/PersistableFlo
 @@ -248,7 +248,7 @@
      onPersistenceError?.(error);
    });
- 
+
 -  const doMove = useEvent((itemId: string, toIndex: number, source: FlowInteractionSource) => {
 +  const applyMove = useEvent((itemId: string, toIndex: number, source: FlowInteractionSource) => {
      const fromIndex = store.visibleIndex(itemId);
@@ -1526,7 +1526,7 @@ diff --git a/frontend/packages/ui/src/components/persistable-flow/PersistableFlo
      return { store, drag, resize, onHandleKeyDown, onHandleBlur, onVisibilityProp };
 -  }, [store, doMove, commitResize, onHandleKeyDown, onHandleBlur, onVisibilityProp]);
 +  }, [store, applyMove, commitResize, onHandleKeyDown, onHandleBlur, onVisibilityProp]);
- 
+
    useEffect(
      () => () => {
 @@ -430,7 +430,7 @@
@@ -1545,7 +1545,7 @@ diff --git a/frontend/packages/ui/src/components/persistable-flow/PersistableFlo
 -    [store, commitChange, commitResize, doMove, confirmMove, emitLayout],
 +    [store, commitChange, commitResize, applyMove, confirmMove, emitLayout],
    );
- 
+
    const ready = useFlowSelector(store, (s) => s.ready && s.containerWidth > 0);
 Index: frontend/packages/client-api/src/index.ts
 IDEA additional info:
@@ -1579,7 +1579,7 @@ diff --git a/frontend/apps/client-repo-ui/src/pages/home/HomePage.tsx b/frontend
  import { DashboardHeader } from './sections/DashboardHeader.tsx';
  import { KpiStrip } from './sections/KpiStrip.tsx';
 @@ -10,19 +15,51 @@
- 
+
  export default function HomePage() {
    useMonitoringPolling();
 +  const t = useT(messages);
@@ -1845,12 +1845,12 @@ diff --git a/frontend/apps/client-repo-ui/src/pages/home/sections/JvmPanel.tsx b
 @@ -23,8 +23,8 @@
  const gcSeriesOf = (t: AppT): LineSeries[] => [{ key: 'pauseMs', label: t('home.jvm.gcPause'), color: 'var(--ui-warning)', area: true }];
  const STATE_COLOR: Record<string, string> = { RUNNABLE: 'var(--ui-success)', WAITING: 'var(--ui-accent-2)', TIMED_WAITING: 'var(--ui-info)', BLOCKED: 'var(--ui-danger)' };
- 
+
 -const pct = (v: number) => `${v}%`;
 -const mb = (v: number) => (v >= 1024 ? `${(v / 1024).toFixed(1)}G` : `${Math.round(v)}M`);
 +const percent = (v: number) => `${v}%`;
 +const formatMegabytes = (v: number) => (v >= 1024 ? `${(v / 1024).toFixed(1)}G` : `${Math.round(v)}M`);
- 
+
  function stats(points: TablePoint[], key: string) {
    const v = points.map((p) => p[key]).filter((x): x is number => x != null);
 @@ -86,7 +86,7 @@
@@ -1972,7 +1972,7 @@ diff --git a/frontend/apps/client-repo-ui/src/pages/home/sections/DashboardHeade
 +++ b/frontend/apps/client-repo-ui/src/pages/home/sections/DashboardHeader.tsx	(date 1795326192814)
 @@ -41,15 +41,15 @@
  }
- 
+
  type Pt = readonly [number, number];
 -const f1 = (n: number) => n.toFixed(1);
 +const oneDecimal = (n: number) => n.toFixed(1);
@@ -1999,7 +1999,7 @@ diff --git a/frontend/apps/client-repo-ui/src/pages/home/monitoring/source.ts b/
 +++ b/frontend/apps/client-repo-ui/src/pages/home/monitoring/source.ts	(date 1795326192818)
 @@ -54,7 +54,7 @@
  const USER: CurrentUser = { login: 'a.elfa', displayName: 'A. Elfa', permissions: new Set(['settings.review', 'settings.edit']) };
- 
+
  function seedApprovals(now: number): ApprovalRequest[] {
 -  const mk = (i: number, p: Partial<ApprovalRequest> & Pick<ApprovalRequest, 'table' | 'recordId' | 'changeType' | 'flow' | 'requestedBy' | 'changes'>): ApprovalRequest => {
 +  const makeRequest = (i: number, p: Partial<ApprovalRequest> & Pick<ApprovalRequest, 'table' | 'recordId' | 'changeType' | 'flow' | 'requestedBy' | 'changes'>): ApprovalRequest => {
@@ -2026,7 +2026,7 @@ diff --git a/frontend/apps/client-repo-ui/src/pages/home/monitoring/source.ts b/
 +    makeRequest(6, { table: 'ALGOTRADING', recordId: 'ALG-00210', changeType: 'DELETE', flow: 'USER_TO_THIRD_PARTY', requestedBy: 'j.martin', status: 'REJECTED', reviewer: 's.durand', changes: [{ field: 'status', before: 'ACTIVE', after: null }] }),
    ];
  }
- 
+
 Index: frontend/apps/client-repo-ui/src/shell/sidepanel/SidePanel.tsx
 IDEA additional info:
 Subsystem: com.intellij.openapi.diff.impl.patch.CharsetEP
@@ -2236,7 +2236,7 @@ diff --git a/frontend/apps/client-repo-ui/src/pages/accounts/SearchAccountPage.t
 +import type { CacheKey } from '@dec/cache';
 +import { refCacheEditor } from '../../cache/refCacheEditor.tsx';
 +import { selectionColumns } from '../../cache/selectionColumns.ts';
- 
+
  const toHeader = (name: string) => name.replace(/([A-Z])/g, ' $1').replace(/^./, (c) => c.toUpperCase());
 +const CURRENCY_EDITOR = refCacheEditor({ cache: currencyCache.name, columns: selectionColumns(currencyCache), labelColumn: 'currencyIsoCode' });
 +
@@ -2247,7 +2247,7 @@ diff --git a/frontend/apps/client-repo-ui/src/pages/accounts/SearchAccountPage.t
    editable: !accountsSchema.ids.includes(c.id),
 +  ...(c.id === 'currencyIsoCode' ? { editor: CURRENCY_EDITOR } : {}),
  }));
- 
+
 +const ACCOUNT_SELECTION_COLUMNS = selectionColumns(accountCache);
 +const ROLE_SELECTION_COLUMNS = selectionColumns(roleCache);
 +const CURRENCY_SELECTION_COLUMNS = selectionColumns(currencyCache);
@@ -2269,7 +2269,7 @@ diff --git a/frontend/apps/client-repo-ui/src/pages/accounts/SearchAccountPage.t
    query: SearchQuery;
 +  selections?: RefSelections;
  }
- 
+
  export default function SearchAccountPage(props: SearchAccountPageProps) {
 @@ -53,8 +75,21 @@
    const [status, setStatus] = useState<SearchStatus>({ state: 'idle' });
@@ -2295,7 +2295,7 @@ diff --git a/frontend/apps/client-repo-ui/src/pages/accounts/SearchAccountPage.t
    const { status: loadStatus, error: loadError, lastSyncAt } = useStoreState('accounts');
 @@ -68,10 +103,11 @@
    const metadata = useMemo(() => toSearchMetadata(searchDef.toMergedSchema()), [searchDef]);
- 
+
    useWorkspaceHandle<AccountPageState>('accounts', {
 -    serialize: () => ({ searchVisible, query: query.current }),
 +    serialize: () => ({ searchVisible, query: query.current, selections }),
@@ -2364,9 +2364,9 @@ diff --git a/frontend/apps/client-repo-ui/src/shell/AppShell.tsx b/frontend/apps
  import { ReloadGuard } from './ReloadGuard.tsx';
  import './shell.css';
 @@ -29,14 +35,37 @@
- 
+
  const OVERVIEW_MIN_WORKSPACES = 3;
- 
+
 +const PANEL_TITLE = { settings: 'shell.settings', outline: 'shell.outline', history: 'shell.history' } as const;
 +
 +function ShellSidePanel({ panel, onClose }: { panel: ShellPanel; onClose: () => void }) {
@@ -2393,7 +2393,7 @@ diff --git a/frontend/apps/client-repo-ui/src/shell/AppShell.tsx b/frontend/apps
    onCountChange: (count: number) => void;
 +  onHistoryDirtyChange: (dirty: boolean) => void;
  }
- 
+
 -function ShellHeader({ overviewOpen, setOverviewOpen, onCountChange }: ShellHeaderProps) {
 +function ShellHeader({ overviewOpen, setOverviewOpen, onCountChange, onHistoryDirtyChange }: ShellHeaderProps) {
    const count = useWorkspaces().length;
@@ -2464,11 +2464,11 @@ diff --git a/frontend/apps/client-repo-ui/src/shell/ToolWindowButtons.tsx b/fron
 +import { AlertTriangle, Folder, History, ScrollText, Settings, Terminal, List } from 'lucide-react';
  import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react';
  import { StatusPopup, type ActivityBarItem } from '@dec/workspace';
- 
+
 @@ -154,7 +154,10 @@
- 
+
  const icon = (Comp: typeof Folder) => <Comp size={16} strokeWidth={1.4} aria-hidden="true" />;
- 
+
 -export const rightBar = (t: AppT): readonly ActivityBarItem[] => [
 -  { id: 'outline', label: t('shell.outline'), icon: icon(List) },
 -  { id: 'history', label: t('shell.history'), icon: icon(History) },
@@ -2489,7 +2489,7 @@ diff --git a/frontend/apps/client-repo-ui/src/shell/shell.css b/frontend/apps/cl
 +++ b/frontend/apps/client-repo-ui/src/shell/shell.css	(date 1795325824741)
 @@ -77,84 +77,15 @@
  .app-layout .dl-sb-item { border-radius: 7px; }
- 
+
  .app-layout .dl-panel-bar {
 -  --t-h: 36px;
 -  --t-cap: 32px;
@@ -2578,7 +2578,7 @@ diff --git a/frontend/apps/client-repo-ui/src/shell/shell.css b/frontend/apps/cl
  .app-layout .dl-tab-close { border-radius: 6px; color: var(--ui-text-3); }
  .app-layout .dl-tab[aria-selected="true"] .dl-tab-close { color: var(--ui-text); }
 @@ -214,6 +145,7 @@
- 
+
  .search-page { display: flex; flex-direction: column; flex: 1; min-height: 0; gap: 14px; padding: 16px 20px 20px; }
  .search-page-panel { flex: none; width: 100%; max-height: 55%; overflow: auto; }
 +.search-page-selections { display: grid; grid-template-columns: minmax(0, 2fr) minmax(0, 1fr) minmax(0, 1fr); gap: 12px; margin-top: 10px; }
@@ -2646,11 +2646,11 @@ diff --git a/frontend/apps/client-repo-ui/src/shell/overview/WorkspaceOverview.t
  import { isDirty, useActiveWorkspaceId, useWorkspaceManager, useWorkspaces, type WorkspaceInstance } from '@dec/workspace';
  import { applyScrolls, captureWorkspace, getSnapshot, pruneSnapshots, type WorkspaceSnapshot } from './snapshots.ts';
  import './overview.css';
- 
+
 -export const OVERVIEW_SHORTCUT = 'mod+w';
  const THUMB_WIDTH = 300;
  const CAPTURE_THROTTLE_MS = 800;
- 
+
 @@ -64,7 +64,7 @@
    const scale = width / snapshot.width;
    return (
@@ -2661,7 +2661,7 @@ diff --git a/frontend/apps/client-repo-ui/src/shell/overview/WorkspaceOverview.t
    );
  }
 @@ -81,7 +81,7 @@
- 
+
    useEffect(() => {
      const onKey = (e: KeyboardEvent) => {
 -      if (!enabled || !matchesShortcut(e, OVERVIEW_SHORTCUT)) return;
@@ -2674,18 +2674,18 @@ diff --git a/frontend/apps/client-repo-ui/src/shell/overview/WorkspaceOverview.t
    const focus = Math.max(0, Math.min(rawFocus, list.length - 1));
    const gridRef = useRef<HTMLDivElement>(null);
 +  const cardRefs = useRef<(HTMLDivElement | null)[]>([]);
- 
+
    useLayoutEffect(() => {
 -    gridRef.current?.querySelector<HTMLElement>(`[data-index="${focus}"]`)?.focus();
 +    const card = cardRefs.current[focus];
 +    card?.focus({ preventScroll: true });
 +    card?.scrollIntoView({ block: 'nearest' });
    }, [focus, list.length]);
- 
+
    const select = useCallback(
 @@ -131,21 +134,20 @@
    );
- 
+
    const columns = () => {
 -    const cards = gridRef.current?.querySelectorAll<HTMLElement>('.ov-card');
 -    if (!cards?.length) return 1;
@@ -2697,7 +2697,7 @@ diff --git a/frontend/apps/client-repo-ui/src/shell/overview/WorkspaceOverview.t
 +    if (!grid) return 1;
 +    return Math.max(1, getComputedStyle(grid).gridTemplateColumns.split(' ').filter(Boolean).length);
    };
- 
+
    const onKeyDown = (e: KeyboardEvent) => {
      if (e.ctrlKey || e.metaKey || e.altKey) return;
      const w = list[focus];
@@ -2728,10 +2728,10 @@ diff --git a/frontend/apps/client-repo-ui/src/shell/overview/WorkspaceOverview.t
 @@ -196,6 +198,7 @@
      return () => window.removeEventListener('keydown', onKey, true);
    }, []);
- 
+
 +  const overviewKeys = useShortcut('overview');
    const host = document.querySelector('.app-shell .dl-main') ?? document.querySelector('.app-shell') ?? document.body;
- 
+
    return createPortal(
 @@ -208,7 +211,7 @@
            </span>
@@ -2829,208 +2829,6 @@ diff --git a/frontend/apps/client-repo-ui/src/shell/overview/overview.css b/fron
  .ov-card-close:hover { background: var(--ui-danger-soft); color: var(--ui-danger); }
  .ov-thumb {
    position: relative;
-Index: frontend/apps/client-repo-ui/src/shell/titlebar/TitleBar.tsx
-IDEA additional info:
-Subsystem: com.intellij.openapi.diff.impl.patch.CharsetEP
-<+>UTF-8
-===================================================================
-diff --git a/frontend/apps/client-repo-ui/src/shell/titlebar/TitleBar.tsx b/frontend/apps/client-repo-ui/src/shell/titlebar/TitleBar.tsx
---- a/frontend/apps/client-repo-ui/src/shell/titlebar/TitleBar.tsx	(revision e0b1d73842738e04807c8c8601ecf7bda2b3a595)
-+++ b/frontend/apps/client-repo-ui/src/shell/titlebar/TitleBar.tsx	(date 1795325297801)
-@@ -1,29 +1,29 @@
- import { useLocaleSwitch, useT } from '@dec/i18n/react';
- import { messages } from '../../i18n/index.ts';
- import type { Locale } from '@dec/i18n';
--import { useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
-+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type Ref } from 'react';
- import { Bell, ChevronDown, Languages, LayoutGrid, Moon, RefreshCw, Search, Sun, Monitor, Maximize2, Minus, X } from 'lucide-react';
- import {
-   CommandPalette,
-   DropdownMenu,
-+  Popover,
-   Tooltip,
-   formatShortcut,
--  matchesShortcut,
--  useCommandPaletteShortcut,
-   useTheme,
-   type CommandItem,
- } from '@dec/ui';
- import { ROUTES, type AppRoute } from '../../app/routes.ts';
- import { platform, desktopWindow, titleBarHandlers } from '../../platform/desktop.ts';
--import { OVERVIEW_SHORTCUT } from '../overview/WorkspaceOverview.tsx';
-+import { isBareKey, matchesAction, useShortcuts } from '../shortcuts/store.ts';
- import { selectRealtime, useMonitoring } from '../../pages/home/monitoring/store.ts';
- import { BrandMark } from './BrandMark.tsx';
- import { NavTabs } from './NavTabs.tsx';
- import { WindowControls } from './WindowControls.tsx';
-+import { NotificationList } from '../notifications/NotificationList.tsx';
-+import { markAllRead, useUnreadCount } from '../notifications/store.ts';
- import './titlebar.css';
- 
- const NO_DRAG = 'button, a, input, select, textarea, [role="button"], [role="tab"], [data-no-drag], [contenteditable="true"]';
--const PALETTE_SHORTCUT = 'mod+k';
- const { onPointerDown, onDoubleClick } = titleBarHandlers(NO_DRAG);
- const dragHandlers = { onPointerDown, onDoubleClick };
- const LANGUAGES: { code: Locale; label: string }[] = [
-@@ -74,20 +74,33 @@
-   const [paletteOpen, setPaletteOpen] = useState(false);
-   const { locale, setLocale } = useLocaleSwitch();
-   const t = useT(messages);
--  const [notificationCount] = useState(0);
-+  const notificationCount = useUnreadCount();
-+  const [notificationsOpen, setNotificationsOpen] = useState(false);
-+  const toggleNotifications = (open: boolean) => {
-+    if (!open && notificationsOpen) markAllRead();
-+    setNotificationsOpen(open);
-+  };
-   const [endRef, endWidth] = useWidth<HTMLDivElement>();
--  useCommandPaletteShortcut(() => setPaletteOpen((o) => !o), PALETTE_SHORTCUT);
-+  const shortcuts = useShortcuts();
- 
-   useEffect(() => {
-     const onKey = (e: KeyboardEvent) => {
--      const route = ROUTES.find((r) => matchesShortcut(e, r.shortcut));
-+      const target = e.target as HTMLElement | null;
-+      const editable = !!target && (target.isContentEditable || /^(input|textarea|select)$/i.test(target.tagName));
-+      const blocked = (id: string) => editable && isBareKey(shortcuts[id] ?? '');
-+      if (matchesAction(e, 'palette') && !blocked('palette')) {
-+        e.preventDefault();
-+        setPaletteOpen((o) => !o);
-+        return;
-+      }
-+      const route = ROUTES.find((r) => matchesAction(e, r.id) && !blocked(r.id));
-       if (!route) return;
-       e.preventDefault();
-       onNavigate(route);
-     };
-     window.addEventListener('keydown', onKey);
-     return () => window.removeEventListener('keydown', onKey);
--  }, [onNavigate]);
-+  }, [onNavigate, shortcuts]);
- 
-   const commands = useMemo<CommandItem[]>(() => {
-     const items: CommandItem[] = ROUTES.map((r) => {
-@@ -98,12 +111,12 @@
-         description: t(r.descriptionKey),
-         group: t('shell.commands.groupNavigate'),
-         icon: <Icon size={15} />,
--        shortcut: r.shortcut,
-+        shortcut: shortcuts[r.id],
-         onRun: () => onNavigate(r),
-       };
-     });
-     items.push(
--      { id: 'overview', label: t('shell.overview.label'), description: t('shell.overview.description'), group: t('shell.commands.groupNavigate'), icon: <LayoutGrid size={15} />, shortcut: OVERVIEW_SHORTCUT, onRun: onOverview },
-+      { id: 'overview', label: t('shell.overview.label'), description: t('shell.overview.description'), group: t('shell.commands.groupNavigate'), icon: <LayoutGrid size={15} />, shortcut: shortcuts.overview, onRun: onOverview },
-       { id: 'theme-dark', label: t('shell.commands.darkTheme'), group: t('shell.commands.groupAppearance'), icon: <Moon size={15} />, onRun: () => setTheme('dark') },
-       { id: 'theme-light', label: t('shell.commands.lightTheme'), group: t('shell.commands.groupAppearance'), icon: <Sun size={15} />, onRun: () => setTheme('light') },
-       { id: 'theme-system', label: t('shell.commands.systemTheme'), group: t('shell.commands.groupAppearance'), icon: <Monitor size={15} />, onRun: () => setTheme('system') },
-@@ -118,7 +131,7 @@
-       );
-     }
-     return items;
--  }, [desktop, onNavigate, onOverview, setTheme, t]);
-+  }, [desktop, onNavigate, onOverview, setTheme, shortcuts, t]);
- 
-   return (
-     <header
-@@ -134,17 +147,17 @@
-       </div>
- 
-       <div className="tb-center">
--        <Tooltip content={t('shell.titlebar.searchCommands')} shortcut={PALETTE_SHORTCUT} placement="bottom" className="tb-tip">
-+        <Tooltip content={t('shell.titlebar.searchCommands')} shortcut={shortcuts.palette} placement="bottom" className="tb-tip">
-         <button
-           type="button"
-           className="tb-command"
-           onClick={() => setPaletteOpen(true)}
-           aria-haspopup="dialog"
--          aria-keyshortcuts="Control+K"
-+          aria-keyshortcuts={formatShortcut(shortcuts.palette ?? '')}
-         >
-           <Search size={13} strokeWidth={2} className="tb-command-icon" />
-           <span className="tb-command-text">{t('shell.titlebar.searchPlaceholder')}</span>
--          <kbd className="tb-kbd">{formatShortcut(PALETTE_SHORTCUT)}</kbd>
-+          <kbd className="tb-kbd">{formatShortcut(shortcuts.palette ?? '')}</kbd>
-         </button>
-         </Tooltip>
-       </div>
-@@ -178,12 +191,29 @@
-             <Moon size={15} className="tb-theme-moon" />
-           </button>
-         </Tooltip>
--        <Tooltip content={t('shell.titlebar.notifications')} placement="bottom" className="tb-tip">
--          <button type="button" className="tb-icon-btn tb-notif" aria-label={t('shell.titlebar.notifications')}>
--            <Bell size={15} />
--            {notificationCount > 0 && <span className="tb-notif-badge">{notificationCount > 99 ? '99+' : notificationCount}</span>}
--          </button>
--        </Tooltip>
-+        <Popover
-+          open={notificationsOpen}
-+          onOpenChange={toggleNotifications}
-+          placement="bottom-end"
-+          className="tb-notif-popover"
-+          aria-label={t('shell.notificationsPanel.title')}
-+          trigger={({ ref, props }) => (
-+            <Tooltip content={t('shell.titlebar.notifications')} placement="bottom" className="tb-tip">
-+              <button
-+                ref={ref as Ref<HTMLButtonElement>}
-+                type="button"
-+                className="tb-icon-btn tb-notif"
-+                aria-label={notificationCount > 0 ? `${t('shell.titlebar.notifications')} (${notificationCount})` : t('shell.titlebar.notifications')}
-+                {...props}
-+              >
-+                <Bell size={15} />
-+                {notificationCount > 0 && <span className="tb-notif-badge" aria-hidden="true">{notificationCount > 99 ? '99+' : notificationCount}</span>}
-+              </button>
-+            </Tooltip>
-+          )}
-+        >
-+          <NotificationList onNavigate={() => toggleNotifications(false)} />
-+        </Popover>
-         {desktop && (
-           <>
-             <span className="tb-divider" aria-hidden="true" />
-Index: frontend/apps/client-repo-ui/src/shell/titlebar/NavTabs.tsx
-IDEA additional info:
-Subsystem: com.intellij.openapi.diff.impl.patch.CharsetEP
-<+>UTF-8
-===================================================================
-diff --git a/frontend/apps/client-repo-ui/src/shell/titlebar/NavTabs.tsx b/frontend/apps/client-repo-ui/src/shell/titlebar/NavTabs.tsx
---- a/frontend/apps/client-repo-ui/src/shell/titlebar/NavTabs.tsx	(revision e0b1d73842738e04807c8c8601ecf7bda2b3a595)
-+++ b/frontend/apps/client-repo-ui/src/shell/titlebar/NavTabs.tsx	(date 1795325297800)
-@@ -3,6 +3,7 @@
- import { useLayoutEffect, useRef, useState } from 'react';
- import { Tooltip, formatShortcut } from '@dec/ui';
- import type { AppRoute } from '../../app/routes.ts';
-+import { useShortcuts } from '../shortcuts/store.ts';
- 
- interface NavTabsProps {
-   routes: readonly AppRoute[];
-@@ -12,6 +13,7 @@
- 
- export function NavTabs({ routes, activeId, onSelect }: NavTabsProps) {
-   const t = useT(messages);
-+  const shortcuts = useShortcuts();
-   const listRef = useRef<HTMLDivElement>(null);
-   const [box, setBox] = useState<{ left: number; width: number } | null>(null);
- 
-@@ -36,13 +38,13 @@
-           const Icon = route.icon;
-           const active = route.id === activeId;
-           return (
--            <Tooltip key={route.id} content={t(route.descriptionKey)} shortcut={route.shortcut} placement="bottom" delay={500} className="tb-tip">
-+            <Tooltip key={route.id} content={t(route.descriptionKey)} shortcut={shortcuts[route.id]} placement="bottom" delay={500} className="tb-tip">
-               <button
-                 type="button"
-                 role="tab"
-                 data-route={route.id}
-                 aria-selected={active}
--                aria-keyshortcuts={formatShortcut(route.shortcut)}
-+                aria-keyshortcuts={formatShortcut(shortcuts[route.id] ?? '')}
-                 className="tb-nav-tab"
-                 onClick={() => onSelect(route)}
-               >
 Index: frontend/packages/core/src/storage/fs.ts
 IDEA additional info:
 Subsystem: com.intellij.openapi.diff.impl.patch.CharsetEP
@@ -3046,10 +2844,10 @@ diff --git a/frontend/packages/core/src/storage/fs.ts b/frontend/packages/core/s
 -const mgr = (): StorageMgr | undefined =>
 +const storageManager = (): StorageMgr | undefined =>
    (globalThis as unknown as { navigator?: { storage?: StorageMgr } }).navigator?.storage;
- 
+
  export class FsBinaryStorageCore implements BinaryStorage {
 @@ -55,7 +55,7 @@
- 
+
    static async create(): Promise<FsBinaryStorageCore> {
      const caps = detectCapabilities();
 -    const m = mgr();
@@ -3059,13 +2857,13 @@ diff --git a/frontend/packages/core/src/storage/fs.ts b/frontend/packages/core/s
      return new FsBinaryStorageCore(root, caps.processor && caps.syncAccessHandle);
 @@ -221,7 +221,7 @@
    }
- 
+
    async usage(): Promise<{ used: number; quota: number }> {
 -    const e = await mgr()?.estimate?.();
 +    const e = await storageManager()?.estimate?.();
      return { used: e?.usage ?? 0, quota: e?.quota ?? 0 };
    }
- 
+
 Index: frontend/packages/cr-factory/src/schema/index.ts
 IDEA additional info:
 Subsystem: com.intellij.openapi.diff.impl.patch.CharsetEP
@@ -3088,7 +2886,7 @@ diff --git a/frontend/packages/grid-react/src/core/gridRef.ts b/frontend/package
 +++ b/frontend/packages/grid-react/src/core/gridRef.ts	(date 1795326192820)
 @@ -3,7 +3,7 @@
  import type { GridServices } from './services.ts';
- 
+
  export function createGridRef<T>(get: () => GridServices<T> | null): ExtendedGridRef<T> {
 -  const svc = async (): Promise<GridServices<T>> => {
 +  const loadServices = async (): Promise<GridServices<T>> => {
@@ -3186,7 +2984,7 @@ diff --git a/frontend/packages/grid-react/src/core/GridController.ts b/frontend/
 +++ b/frontend/packages/grid-react/src/core/GridController.ts	(date 1795326192808)
 @@ -137,13 +137,13 @@
    }
- 
+
    remoteRefresh(): Promise<void> {
 -    return (this.refreshing ??= this.doRefresh().finally(() => {
 +    return (this.refreshing ??= this.reloadData().finally(() => {
@@ -3194,7 +2992,7 @@ diff --git a/frontend/packages/grid-react/src/core/GridController.ts b/frontend/
        if (!this.disposed) this.patch({ syncing: false });
      }));
    }
- 
+
 -  private async doRefresh(): Promise<void> {
 +  private async reloadData(): Promise<void> {
      this.patch({ syncing: true });
@@ -3211,12 +3009,12 @@ diff --git a/frontend/packages/grid-react/src/cells/editors.tsx b/frontend/packa
 @@ -15,14 +15,14 @@
    };
  }
- 
+
 -function cls(error?: string | null): string {
 +function editorClass(error?: string | null): string {
    return error ? 'dg-input dg-input-error' : 'dg-input';
  }
- 
+
  export function TextEditor<T = RowRecord>(p: CellEditorProps<T>) {
    return (
      <input
@@ -3262,7 +3060,7 @@ diff --git a/frontend/packages/grid/src/query/core.ts b/frontend/packages/grid/s
 +++ b/frontend/packages/grid/src/query/core.ts	(date 1795326192856)
 @@ -13,8 +13,8 @@
  }
- 
+
  interface Stamped {
 -  sv: number;
 -  cv: number;
@@ -3270,7 +3068,7 @@ diff --git a/frontend/packages/grid/src/query/core.ts b/frontend/packages/grid/s
 +  changesVersion: number;
    ids: Uint32Array;
  }
- 
+
 @@ -77,36 +77,36 @@
    run(spec: QuerySpec, reader: RowReader, changes: ChangeCore, signal?: AbortSignal): QueryResult {
      checkAbort(signal);
@@ -3287,11 +3085,11 @@ diff --git a/frontend/packages/grid/src/query/core.ts b/frontend/packages/grid/s
      const fullKey = stageKey + '\u0002' + ok;
 -    const out = (r: Result): QueryResult => ({ queryId: r.queryId, datasetVersion: sv, changeVersion: cv, count: r.ids.length, rowIds: r.ids.slice() });
 +    const out = (r: Result): QueryResult => ({ queryId: r.queryId, datasetVersion: schemaVersion, changeVersion: changesVersion, count: r.ids.length, rowIds: r.ids.slice() });
- 
+
      const hit = this.touch(this.results, fullKey);
 -    if (hit && hit.sv === sv && hit.cv === cv) return out(hit);
 +    if (hit && hit.schemaVersion === schemaVersion && hit.changesVersion === changesVersion) return out(hit);
- 
+
      const plan = new QueryPlan(spec, reader.rowCount);
      this.lastPlan = plan;
      let ids: Uint32Array;
@@ -3320,7 +3118,7 @@ diff --git a/frontend/packages/grid/src/query/core.ts b/frontend/packages/grid/s
 @@ -166,12 +166,12 @@
      }
    }
- 
+
 -  private filter(node: FilterNode, vm: string, ids: Uint32Array, reader: RowReader, plan: QueryPlan, sv: number, cv: number, signal?: AbortSignal): Uint32Array {
 +  private filter(node: FilterNode, vm: string, ids: Uint32Array, reader: RowReader, plan: QueryPlan, schemaVersion: number, changesVersion: number, signal?: AbortSignal): Uint32Array {
      const parts = flattenAnd(node);
@@ -3341,7 +3139,7 @@ diff --git a/frontend/packages/grid/src/query/core.ts b/frontend/packages/grid/s
      if (this.filterMemos.length > 6) this.filterMemos.shift();
      return result;
    }
- 
+
 -  private search(spec: QuerySpec, vm: string, fk: string, ids: Uint32Array, reader: RowReader, sv: number, cv: number, signal?: AbortSignal): Uint32Array {
 +  private search(spec: QuerySpec, vm: string, fk: string, ids: Uint32Array, reader: RowReader, schemaVersion: number, changesVersion: number, signal?: AbortSignal): Uint32Array {
      const s = spec.search!;
@@ -3389,10 +3187,10 @@ diff --git a/frontend/packages/grid-react/src/themes/themes.ts b/frontend/packag
 @@ -86,23 +86,23 @@
    };
  }
- 
+
 -const px = (v: string | number) => (typeof v === 'number' ? `${v}px` : v);
 +const toPx = (v: string | number) => (typeof v === 'number' ? `${v}toPx` : v);
- 
+
  export function themeStyle(theme: ThemeInput, density: Density, overrides?: ThemeOverrides, rowHeight?: number, colorScheme?: ColorScheme): CSSProperties {
    const t = resolveTheme(theme, colorScheme);
    const m = resolveMetrics(t.name, density, overrides, rowHeight);
@@ -3425,9 +3223,9 @@ diff --git a/frontend/packages/grid/src/query/sort.ts b/frontend/packages/grid/s
 --- a/frontend/packages/grid/src/query/sort.ts	(revision e0b1d73842738e04807c8c8601ecf7bda2b3a595)
 +++ b/frontend/packages/grid/src/query/sort.ts	(date 1795326192812)
 @@ -28,7 +28,7 @@
- 
+
  const isKnown = (k: Uint32Array, id: number): boolean => id >>> 5 < k.length && ((k[id >>> 5] >>> (id & 31)) & 1) === 1;
- 
+
 -const compare1 = (s: Spec, a: number, b: number): number => {
 +const compareBySpec = (s: Spec, a: number, b: number): number => {
    const x = s.keys[a];
@@ -3506,7 +3304,7 @@ diff --git a/frontend/packages/grid/src/table/host.ts b/frontend/packages/grid/s
  import { ipcToRows } from '../vector/transformer.ts';
 -import { toTableSchema } from './schema.ts';
 +import { toTableSchema } from '@dec/data-engine';
- 
+
  export interface TableSource {
    acquire(schema: TableSchema): Promise<Table>;
 Index: frontend/packages/grid-react/src/components/SidePanel.tsx
@@ -3526,7 +3324,7 @@ diff --git a/frontend/packages/grid-react/src/components/SidePanel.tsx b/fronten
 +  const dragClass = (id: string) => (drag === id ? ' dg-dl-drag' : over === id && drag !== id ? ' dg-dl-over' : '');
 +  return { bind, dragClass };
  }
- 
+
  function Section({ title, count, children }: { title: string; count: number; children: ReactNode }) {
 @@ -69,7 +69,7 @@
    const t = useT(messages);
@@ -3585,7 +3383,7 @@ rename to frontend/packages/data-engine/src/store/TableStore.ts
 +import type { RemoteChange } from '../types.ts';
 +import type { Table } from '../table/Table.ts';
 +import { TableStoreError } from './TableStoreError.ts';
- 
+
  export interface TableStoreMeta {
    readonly tableId: string;
 @@ -139,10 +141,10 @@
@@ -3618,7 +3416,7 @@ rename to frontend/packages/data-engine/src/store/TableStore.ts
 +      throw new TableStoreError('PERSIST_FAILED', `journal append failed in "${this.dir}"`, { cause: e });
      }
    }
- 
+
 @@ -281,7 +283,7 @@
        this.journals = this.journals.filter((j) => j !== journal);
        this.baseChanged = this.baseChanged || baseWasChanged || base !== null;
@@ -3638,11 +3436,11 @@ diff --git a/frontend/packages/grid-react/src/components/PerfOverlay.tsx b/front
 +++ b/frontend/packages/grid-react/src/components/PerfOverlay.tsx	(date 1795326192829)
 @@ -10,7 +10,7 @@
  type Level = 'good' | 'warn' | 'bad' | 'idle';
- 
+
  const msLevel = (n: number, good = 16, warn = 50): Level => (n <= 0 ? 'idle' : n <= good ? 'good' : n <= warn ? 'warn' : 'bad');
 -const fmtMs = (n: number) => (n >= 1000 ? `${(n / 1000).toFixed(2)}s` : n >= 100 ? `${n.toFixed(0)}ms` : `${n.toFixed(1)}ms`);
 +const formatDuration = (n: number) => (n >= 1000 ? `${(n / 1000).toFixed(2)}s` : n >= 100 ? `${n.toFixed(0)}ms` : `${n.toFixed(1)}ms`);
- 
+
  function Metric({ label, value, level, sub }: { label: string; value: string; level: Level; sub?: string }) {
    return (
 @@ -64,7 +64,7 @@
@@ -3651,7 +3449,7 @@ diff --git a/frontend/packages/grid-react/src/components/PerfOverlay.tsx b/front
    const cacheLevel: Level = s.cacheHitRatio <= 0 ? 'idle' : cachePct >= 80 ? 'good' : cachePct >= 50 ? 'warn' : 'bad';
 -  const stat = (x: { avg: number; max: number; count: number }) => (x.count ? t('perf.maxCount', { max: fmtMs(x.max), count: x.count }) : t('perf.idle'));
 +  const stat = (x: { avg: number; max: number; count: number }) => (x.count ? t('perf.maxCount', { max: formatDuration(x.max), count: x.count }) : t('perf.idle'));
- 
+
    return (
      <ThemedPortal>
 @@ -79,19 +79,19 @@
@@ -3785,7 +3583,7 @@ rename to frontend/packages/data-engine/src/schema/toTableSchema.ts
 -import type { ColumnType, Schema } from '../types/data.ts';
 +import type { ColumnType as EngineColumnType, TableSchema } from '../types.ts';
 +import type { ColumnType, Schema } from '@dec/core';
- 
+
  const engineType = (type: ColumnType): EngineColumnType => {
    switch (type) {
 Index: frontend/packages/cache/src/protocol/runtime.ts
@@ -4271,9 +4069,9 @@ diff --git a/frontend/packages/data-engine/src/index.ts b/frontend/packages/data
 +export * from './store/TableStore.ts';
 +export * from './store/TableStoreError.ts';
 +export * from './schema/toTableSchema.ts';
- 
+
  export const defaultEngines = new EngineRegistry().register(jsEngineFactory);
- 
+
 Index: frontend/packages/data-engine/src/engine/StorageEngine.ts
 IDEA additional info:
 Subsystem: com.intellij.openapi.diff.impl.patch.CharsetEP
@@ -4301,7 +4099,7 @@ diff --git a/frontend/packages/data-engine/src/table/Table.ts b/frontend/package
 @@ -472,6 +472,44 @@
      return loader.finish();
    }
- 
+
 +  loadIpc(ipc: Uint8Array, options: LoadOptions = {}): LoadOutcome | null {
 +    this.alive();
 +    const staged = this.createEngine();
@@ -4362,7 +4160,7 @@ diff --git a/frontend/packages/workspace/src/stores/react/context.tsx b/frontend
  import { closeStoreWorkspace, hostStoreWorkspace, openStoreWorkspace, releaseStoreWorkspace } from '../workspaces.ts';
  import { WorkspaceDialogs } from './dialogs.tsx';
 +import { RefCacheBinding } from './refCacheBinding.tsx';
- 
+
  interface ContextValue {
    workspace: StoreWorkspace;
 @@ -63,6 +64,9 @@
@@ -4372,13 +4170,13 @@ diff --git a/frontend/packages/workspace/src/stores/react/context.tsx b/frontend
 +  const workspaceConfig = 'workspace' in config ? config.workspace : config;
 +  const refCaches = useMemo(() => workspaceConfig.refCaches ?? [], [workspaceConfig]);
 +  const refCacheBinding = <RefCacheBinding hostId={manager && hostId ? hostId : null} workspaceId={hostId ?? `${workspaceConfig.id}:${key}`} refCaches={refCaches} />;
- 
+
    useEffect(() => {
      const workspace = openStoreWorkspace(config, { instanceKey: key, runtime }) as unknown as StoreWorkspace;
 @@ -80,12 +84,18 @@
      };
    }, [config, key, runtime, manager, hostId]);
- 
+
 -  if (!value) return <>{fallback}</>;
    return (
 -    <StoreWorkspaceContext.Provider value={value}>
@@ -4398,7 +4196,7 @@ diff --git a/frontend/packages/workspace/src/stores/react/context.tsx b/frontend
 +    </>
    );
  }
- 
+
 Index: frontend/packages/cache/src/client/index.ts
 IDEA additional info:
 Subsystem: com.intellij.openapi.diff.impl.patch.CharsetEP
@@ -4683,7 +4481,7 @@ diff --git a/frontend/apps/client-repo-ui/src/data/accountWorkspace.ts b/fronten
 +import {accountsApi, accountsUpdateAllApi} from '@dec/client-api';
 +import {defineWorkspace} from '@dec/workspace';
 +import {currencyCache, roleCache} from './refCaches.ts';
- 
+
  export const accountWorkspace = defineWorkspace({
    id: 'accounts',
 @@ -14,5 +15,6 @@
@@ -4798,7 +4596,7 @@ diff --git a/frontend/packages/workspace/src/core/WorkspaceManager.ts b/frontend
 @@ -419,7 +419,7 @@
      return p;
    }
- 
+
 -  private doLoad(id: string): Promise<void> {
 +  private loadWorkspace(id: string): Promise<void> {
      const p = (async () => {
@@ -4816,7 +4614,7 @@ diff --git a/frontend/packages/workspace/src/core/WorkspaceManager.ts b/frontend
 @@ -467,7 +467,7 @@
      return p.then(() => this.must(id));
    }
- 
+
 -  private async doRestore(id: string): Promise<void> {
 +  private async restoreWorkspace(id: string): Promise<void> {
      const cur = this.registry.get(id);
@@ -4834,10 +4632,10 @@ diff --git a/frontend/packages/workspace/src/core/WorkspaceManager.ts b/frontend
 @@ -558,7 +558,7 @@
      return p;
    }
- 
+
 -  private async doSuspend(id: string): Promise<boolean> {
 +  private async suspendWorkspace(id: string): Promise<boolean> {
- 
+
      const draft = this.drafts.get(id);
      if (draft) await draft.catch(() => {});
 @@ -701,7 +701,7 @@
@@ -4852,7 +4650,7 @@ diff --git a/frontend/packages/workspace/src/core/WorkspaceManager.ts b/frontend
 @@ -710,7 +710,7 @@
      return p;
    }
- 
+
 -  private async doDraft(id: string): Promise<void> {
 +  private async writeDraft(id: string): Promise<void> {
      const inst = this.must(id);
@@ -4870,7 +4668,7 @@ diff --git a/frontend/packages/workspace/src/core/WorkspaceManager.ts b/frontend
 @@ -814,7 +814,7 @@
      return p;
    }
- 
+
 -  private async doSave(id: string): Promise<SaveResult> {
 +  private async saveWorkspace(id: string): Promise<SaveResult> {
      let restoredNow = false;
@@ -4887,7 +4685,7 @@ diff --git a/frontend/packages/workspace/src/core/WorkspaceManager.ts b/frontend
      p.then(clear, clear);
      return p;
    }
- 
+
 -  private async doClose(id: string): Promise<void> {
 +  private async closeWorkspace(id: string): Promise<void> {
      const inst = this.registry.get(id);
@@ -4916,7 +4714,7 @@ diff --git a/frontend/packages/ui/src/search/react/SearchToolbar.tsx b/frontend/
 +      document.removeEventListener("keydown", closeBellOnEscape);
      };
    }, [bellOpen]);
- 
+
 Index: frontend/packages/workspace/src/data/DataWorkspaceManager.ts
 IDEA additional info:
 Subsystem: com.intellij.openapi.diff.impl.patch.CharsetEP
@@ -4936,7 +4734,7 @@ diff --git a/frontend/packages/workspace/src/data/DataWorkspaceManager.ts b/fron
        pending.then(clear, clear);
 @@ -154,7 +154,7 @@
    }
- 
+
    enforce(): Promise<void> {
 -    return (this.enforcing ??= this.doEnforce().finally(() => {
 +    return (this.enforcing ??= this.evictOverBudget().finally(() => {
@@ -4946,7 +4744,7 @@ diff --git a/frontend/packages/workspace/src/data/DataWorkspaceManager.ts b/fron
 @@ -196,7 +196,7 @@
      return owner;
    }
- 
+
 -  private async doOpen(id: string): Promise<DataWorkspace> {
 +  private async openWorkspace(id: string): Promise<DataWorkspace> {
      const owner = await this.acquire(id);
@@ -4955,7 +4753,7 @@ diff --git a/frontend/packages/workspace/src/data/DataWorkspaceManager.ts b/fron
 @@ -233,7 +233,7 @@
      void this.enforce().catch((e) => this.onError(e, { phase: 'enforce' }));
    }
- 
+
 -  private async doEnforce(): Promise<void> {
 +  private async evictOverBudget(): Promise<void> {
      const byAge = (state: string): DataWorkspace[] =>
@@ -5158,7 +4956,7 @@ diff --git a/frontend/packages/workspace/src/data/DataWorkspace.ts b/frontend/pa
 @@ -494,7 +494,7 @@
      this.binding = null;
    }
- 
+
 -  private async doClose(mode: DataCloseMode): Promise<void> {
 +  private async closeNow(mode: DataCloseMode): Promise<void> {
      for (const slot of this.slots.values()) await slot.loading?.catch(() => undefined);
@@ -6336,7 +6134,7 @@ diff --git a/frontend/apps/client-repo-ui/package.json b/frontend/apps/client-re
 +++ b/frontend/apps/client-repo-ui/package.json	(date 1795253502516)
 @@ -15,6 +15,8 @@
    },
- 
+
    "dependencies": {
 +    "@dec/cache": "^0.0.1",
 +    "@dec/cache-react": "^0.0.1",
@@ -7271,12 +7069,12 @@ diff --git a/frontend/packages/workspace/src/react/WorkspaceTabs.tsx b/frontend/
 -import { memo, useCallback, useRef, type KeyboardEvent, type ReactNode } from 'react';
 +import { memo, useCallback, useEffect, useRef, useState, type KeyboardEvent, type ReactNode } from 'react';
  import { useWorkspaceInstance } from './hooks/useWorkspaces.ts';
- 
+
  export const TAB_DRAG_MIME = 'application/x-dl-workspace';
 @@ -114,6 +114,18 @@
    );
  });
- 
+
 +function OverflowItem({ id, selected, renderIcon, onPick }: { id: string; selected: boolean; renderIcon?: (icon: string) => ReactNode; onPick(id: string): void }) {
 +  const w = useWorkspaceInstance(id);
 +  if (!w) return null;
@@ -7404,7 +7202,7 @@ diff --git a/frontend/packages/ui/src/components/colors/color.ts b/frontend/pack
 @@ -45,7 +45,7 @@
    return parts.every(Boolean) ? parts : null;
  }
- 
+
 -function num(part: string, scale: number): number | null {
 +function parseChannel(part: string, scale: number): number | null {
    const pct = part.endsWith('%');
@@ -7435,16 +7233,16 @@ diff --git a/frontend/packages/ui/src/components/colors/color.ts b/frontend/pack
 @@ -170,11 +170,11 @@
    return { h: c.h, s: v ? 2 * (1 - ln / v) * 100 : 0, v: v * 100, a: c.a };
  }
- 
+
 -const hex2 = (n: number) => clamp(Math.round(n), 0, 255).toString(16).padStart(2, '0');
 +const toHexByte = (n: number) => clamp(Math.round(n), 0, 255).toString(16).padStart(2, '0');
- 
+
  export function formatHex(c: RGBA, alpha: 'auto' | boolean = 'auto'): string {
    const withAlpha = alpha === 'auto' ? c.a < 1 : alpha;
 -  return `#${hex2(c.r)}${hex2(c.g)}${hex2(c.b)}${withAlpha ? hex2(c.a * 255) : ''}`;
 +  return `#${toHexByte(c.r)}${toHexByte(c.g)}${toHexByte(c.b)}${withAlpha ? toHexByte(c.a * 255) : ''}`;
  }
- 
+
  export function formatHex8(c: RGBA): string {
 Index: frontend/packages/cache/src/processors/clients/ClientRegistry.ts
 IDEA additional info:
@@ -7575,20 +7373,20 @@ diff --git a/frontend/packages/ui/src/components/colors/GradientPicker.tsx b/fro
 @@ -33,7 +33,7 @@
    return { angle: g.angle, stops: g.stops.map((s) => ({ ...s, id: ++seq })) };
  }
- 
+
 -const round1 = (n: number) => Math.round(n * 10) / 10;
 +const roundToTenth = (n: number) => Math.round(n * 10) / 10;
  const sortStops = (stops: Stop[]) => [...stops].sort((a, b) => a.position - b.position);
  const cssOf = (angle: number, stops: Stop[]) => formatLinearGradient({ angle, stops: stops.map(({ color, position }) => ({ color, position })) });
- 
+
 @@ -90,7 +90,7 @@
- 
+
    const posFromEvent = (clientX: number) => {
      const r = barRef.current!.getBoundingClientRect();
 -    return round1(Math.min(100, Math.max(0, ((clientX - r.left) / r.width) * 100)));
 +    return roundToTenth(Math.min(100, Math.max(0, ((clientX - r.left) / r.width) * 100)));
    };
- 
+
    const onBarDown = (e: ReactPointerEvent<HTMLDivElement>) => {
 @@ -117,7 +117,7 @@
      }
@@ -7597,7 +7395,7 @@ diff --git a/frontend/packages/ui/src/components/colors/GradientPicker.tsx b/fro
 -    updateStop(s.id, { position: round1(Math.min(100, Math.max(0, pos))) });
 +    updateStop(s.id, { position: roundToTenth(Math.min(100, Math.max(0, pos))) });
    };
- 
+
    const angleFromEvent = (e: ReactPointerEvent<HTMLDivElement>) => {
 Index: frontend/packages/cache/src/processors/load/LoadEngine.ts
 IDEA additional info:
@@ -8486,15 +8284,15 @@ diff --git a/frontend/packages/workspace/src/react/WorkspaceLayout.tsx b/fronten
 --- a/frontend/packages/workspace/src/react/WorkspaceLayout.tsx	(revision e0b1d73842738e04807c8c8601ecf7bda2b3a595)
 +++ b/frontend/packages/workspace/src/react/WorkspaceLayout.tsx	(date 1795269840565)
 @@ -23,6 +23,7 @@
- 
+
    leftBar?: readonly ActivityBarItem[];
    rightBar?: readonly ActivityBarItem[];
 +  rightPanel?: ReactNode;
- 
+
    allowSplit?: boolean;
    renderIcon?: (icon: string) => ReactNode;
 @@ -35,7 +36,7 @@
- 
+
  function LayoutBody(props: Omit<WorkspaceLayoutProps, keyof WorkspaceProviderProps> & Pick<WorkspaceLayoutProps, 'children'>) {
    const ready = useContext(ReadyContext);
 -  const { theme = 'auto', showWorkspaceList, header, toolbar, statusBar, leftBar, rightBar, allowSplit = true, renderIcon, emptyState, className, style, children } = props;
